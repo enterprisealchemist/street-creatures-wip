@@ -13,11 +13,11 @@ Each of Review and Release has one **Send** button: it starts the `relay` Action
 which fires one Claude routine (Top Cat for Review, Garfield for Release). The routine reads your comments on the issues
 and messages the right session.
 
-## Lock
+## Token
 
-The page holds no data. Your GitHub fine-grained token is encrypted in your browser with your password (PBKDF2 600k,
-AES-GCM); only the encrypted copy is stored, and the page asks for the password each time it opens. **Lock** forgets the
-token until you unlock again. The token is only ever sent to api.github.com.
+The page holds no data. Your GitHub fine-grained token is pasted once per browser and kept in that browser's local
+storage, so a refresh opens straight away (Vito 10-18: no password). **Forget token** removes it. The token is only ever
+sent to api.github.com. A browser still holding the old password-locked copy asks for the password once and converts it.
 
 Token permissions: street-creatures: Issues read and write, Contents read (captures); street-creatures-wip: Actions read
 and write (Send).

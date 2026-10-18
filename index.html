@@ -109,22 +109,21 @@
 <div class="wrap">
   <header>
     <h1>Street Creatures · Work in Progress</h1>
-    <div class="status"><span id="stamp">Locked</span><button id="reload" type="button" hidden>Refresh now</button><button id="lock" type="button" hidden>Lock</button></div>
+    <div class="status"><span id="stamp">Not set up</span><button id="reload" type="button" hidden>Refresh now</button><button id="lock" type="button" hidden>Forget token</button></div>
   </header>
 
-  <!-- Setup: token + password, encrypted into this browser. Unlock: password only. -->
+  <!-- Setup: the token is kept in this browser (Vito 10-18: no password). Unlock only converts an old password-locked copy. -->
   <section id="setup" class="gate" hidden>
     <h2>Set up this browser</h2>
     <p class="sub">Paste your GitHub fine-grained token (street-creatures: Issues read and write, Contents read; street-creatures-wip: Actions read and write)
-      and choose a password. The token is encrypted with the password before it is stored, so the stored copy is useless without it. Nothing leaves this browser except calls to api.github.com.</p>
+      once. It stays in this browser until you press Forget token. Nothing leaves this browser except calls to api.github.com.</p>
     <div class="row"><input id="tok" type="password" autocomplete="off" placeholder="github_pat_…" aria-label="GitHub token"></div>
-    <div class="row"><input id="pw1" type="password" autocomplete="new-password" placeholder="Password" aria-label="Password">
-      <input id="pw2" type="password" autocomplete="new-password" placeholder="Password again" aria-label="Password again"></div>
-    <div class="row"><button id="setup-go" class="primary" type="button">Encrypt and open</button></div>
+    <div class="row"><button id="setup-go" class="primary" type="button">Save and open</button></div>
     <div id="setup-err" class="err" hidden></div>
   </section>
   <section id="unlock" class="gate" hidden>
-    <h2>Unlock</h2>
+    <h2>Unlock once</h2>
+    <p class="sub">This browser still has the old password-locked token. Enter the password one last time; after that the page opens without it.</p>
     <div class="row"><input id="pw" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password"><button id="unlock-go" class="primary" type="button">Unlock</button></div>
     <div id="unlock-err" class="err" hidden></div>
     <p class="note">Forgot it? <button id="reset" type="button">Forget the stored token</button> and set up again with a token.</p>
@@ -193,7 +192,7 @@ const RELAY = "enterprisealchemist/street-creatures-wip";   // relay.yml there f
 const API = "https://api.github.com";
 const LIVE = ["progress", "todo", "ready", "review", "park", "proposal"];
 const ACTIVE = ["progress", "todo", "ready", "review"];
-const VAULT = "sc-wip-vault", OLD = "sc-wip-token", TAB = "sc-wip-tab", SENT = "sc-wip-sent";
+const VAULT = "sc-wip-vault", OLD = "sc-wip-token", TOK = "sc-wip-gh", TAB = "sc-wip-tab", SENT = "sc-wip-sent";
 const $ = (id) => document.getElementById(id);
 let token = null, tickets = [], etag = null, timer = null, busy = false;
 let proposals = [], releases = [], relDone = [];
@@ -213,18 +212,13 @@ const ageClass = (h) => h >= 24 ? "bad" : h >= 4 ? "warn" : null;
 const link = (t) => el("a", { class: "tk", href: t.url, target: "_blank", rel: "noopener" }, t.id);
 const stamp = () => new Date().toISOString().slice(0, 16).replace("T", " ") + "Z";
 
-// ---- the lock: AES-GCM with a PBKDF2 key from the password; only {salt, iv, ciphertext} is stored ----
+// ---- the old lock (AES-GCM, PBKDF2 key from a password): kept only to convert a stored copy once ----
 const b64 = (u) => btoa(String.fromCharCode(...new Uint8Array(u)));
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 async function keyFrom(pw, salt) {
   const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 600000, hash: "SHA-256" }, base,
     { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-}
-async function seal(tok, pw) {
-  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await keyFrom(pw, salt), new TextEncoder().encode(tok));
-  store.set(VAULT, JSON.stringify({ v: 1, salt: b64(salt), iv: b64(iv), ct: b64(ct) }));
 }
 async function open_(pw) {
   const v = JSON.parse(store.get(VAULT));
@@ -289,7 +283,7 @@ async function load(force) {
     }
     render();
   } catch (e) {
-    if (e.auth) { store.del(VAULT); lock(); $("setup-err").textContent = e.message; $("setup-err").hidden = false; }
+    if (e.auth) { store.del(TOK); lock(); $("setup-err").textContent = e.message; $("setup-err").hidden = false; }
     else $("stamp").textContent = "Load failed: " + e.message;
   } finally { busy = false; }
 }
@@ -330,8 +324,11 @@ function parseNote(body) {
 }
 // Captures live in the private repo: fetched with the token, shown as object URLs.
 const imgCache = {};
-async function shot(s) {
-  const fig = el("figure", {}, el("div", { class: "note" }, "Loading " + s.path));
+function shot(s, into) {
+  const fig = el("figure", {}, el("div", { class: "note" }, "Loading " + s.path.split("/").pop() + "…"));
+  into.append(fig); fill(fig, s);
+}
+async function fill(fig, s) {
   try {
     if (!imgCache[s.path]) {
       const r = await gh(`/repos/${REPO}/contents/${s.path.split("/").map(encodeURIComponent).join("/")}?ref=master`, { headers: { Accept: "application/vnd.github.raw+json" } });
@@ -347,7 +344,6 @@ async function shot(s) {
       : /\.(ogg|wav|mp3)$/i.test(s.path) ? el("audio", { src: u, controls: "" }) : el("img", { src: u, alt: s.cap || s.path });
     fig.replaceChildren(media, s.cap ? el("figcaption", {}, s.cap) : null);
   } catch (e) { fig.replaceChildren(el("div", { class: "err" }, `Capture ${s.path} did not load (${e.message}).`)); }
-  return fig;
 }
 
 // ---- verdicts: comment + label on the issue now; the batch Send fires one routine later ----
@@ -402,14 +398,19 @@ function card(t, kind) {
     const b = el("div", { class: "body" }); b.innerHTML = t.bodyHtml;   // GitHub's own sanitised render
     b.querySelectorAll("pre").forEach((p) => { if (p.textContent.trim().startsWith("status:") || /^\s*(owner|status|next|priority):/m.test(p.textContent)) p.remove(); });
     b.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener"; });
+    // The Capture: lines are shown as images below, not as text
+    const walk = document.createTreeWalker(b, NodeFilter.SHOW_TEXT), cut = [];
+    while (walk.nextNode()) if (/^\s*Capture:\s*\S+/.test(walk.currentNode.nodeValue)) cut.push(walk.currentNode);
+    for (const n of cut) { const nx = n.nextSibling; if (nx && nx.nodeName === "BR") nx.remove(); const par = n.parentNode; n.remove();
+      if (par !== b && par.nodeName === "P" && !par.textContent.trim()) par.remove(); }
     c.append(b);
     const caps = [...t.rest.matchAll(/^Capture:\s*(\S+)\s*(?:\|\s*(.*))?$/gm)].map((m) => ({ path: m[1], cap: m[2] || "" }));
-    if (caps.length) { const shots = el("div", { class: "shots" }); c.append(shots); caps.forEach((s) => shot(s).then((f) => shots.append(f))); }
+    if (caps.length) { const shots = el("div", { class: "shots" }); c.append(shots); caps.forEach((s) => shot(s, shots)); }
   } else {
     if (t.note.where) c.append(el("div", { class: "note" }, "Where: " + t.note.where));
     if (t.note.summary.length) c.append(el("div", {}, t.note.summary.join(" ")));
     const shots = el("div", { class: "shots" }); c.append(shots);
-    t.note.shots.forEach((s) => shot(s).then((f) => shots.append(f)));
+    t.note.shots.forEach((s) => shot(s, shots));
     if (!t.note.shots.length) shots.append(el("div", { class: "err" }, "No capture on this note."));
   }
   const ta = el("textarea", { placeholder: isRev ? "Comment (optional; say what to change if rejecting)" : "Comment (say what to fix)", "aria-label": "Comment on " + t.id });
@@ -555,11 +556,12 @@ document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("
 
 function lock() {
   token = null; etag = null; tickets = []; proposals = []; releases = []; relDone = [];
-  clearInterval(timer); $("app").hidden = true; $("reload").hidden = $("lock").hidden = true; $("stamp").textContent = "Locked";
+  clearInterval(timer); $("app").hidden = true; $("reload").hidden = $("lock").hidden = true; $("stamp").textContent = "Not set up";
   const has = !!store.get(VAULT);
   $("setup").hidden = has; $("unlock").hidden = !has;
   (has ? $("pw") : $("tok")).focus();
 }
+function forget() { store.del(TOK); store.del(VAULT); lock(); }
 function start() {
   $("setup").hidden = $("unlock").hidden = true; $("setup-err").hidden = $("unlock-err").hidden = true;
   $("app").hidden = false; $("reload").hidden = $("lock").hidden = false;
@@ -567,11 +569,9 @@ function start() {
   load(true); clearInterval(timer); timer = setInterval(() => { if (!document.hidden) load(false); }, 60000);
 }
 $("setup-go").addEventListener("click", async () => {
-  const t = $("tok").value.replace(/\s+/g, ""), a = $("pw1").value, b = $("pw2").value, err = $("setup-err");
+  const t = $("tok").value.replace(/\s+/g, ""), err = $("setup-err");
   err.hidden = true;
   if (!t) { err.textContent = "Paste the token."; err.hidden = false; return; }
-  if (a.length < 8) { err.textContent = "Use a password of 8 characters or more."; err.hidden = false; return; }
-  if (a !== b) { err.textContent = "The two passwords differ."; err.hidden = false; return; }
   // Test the token first, so a bad paste is caught here rather than after it is stored.
   const r = await fetch(`${API}/repos/${REPO}`, { headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + t } }).catch(() => null);
   if (!r || !r.ok) {
@@ -580,24 +580,23 @@ $("setup-go").addEventListener("click", async () => {
       : `GitHub said ${r.status}: the token works but cannot see ${REPO}; give it access to that repo.`;
     err.hidden = false; return;
   }
-  await seal(t, a); store.del(OLD);
-  token = t; $("tok").value = $("pw1").value = $("pw2").value = ""; start();
+  store.set(TOK, t); store.del(OLD); store.del(VAULT);
+  token = t; $("tok").value = ""; start();
 });
 $("unlock-go").addEventListener("click", async () => {
   const err = $("unlock-err"); err.hidden = true;
-  try { token = await open_($("pw").value); $("pw").value = ""; start(); }
+  try { token = await open_($("pw").value); $("pw").value = ""; store.set(TOK, token); store.del(VAULT); start(); }
   catch (e) { err.textContent = "Wrong password."; err.hidden = false; }
 });
-for (const [i, b] of [["pw", "unlock-go"], ["pw2", "setup-go"]]) $(i).addEventListener("keydown", (e) => { if (e.key === "Enter") $(b).click(); });
-$("reset").addEventListener("click", () => { store.del(VAULT); lock(); });
+for (const [i, b] of [["pw", "unlock-go"], ["tok", "setup-go"]]) $(i).addEventListener("keydown", (e) => { if (e.key === "Enter") $(b).click(); });
+$("reset").addEventListener("click", forget);
 $("reload").addEventListener("click", () => token && load(true));
-$("lock").addEventListener("click", lock);
+$("lock").addEventListener("click", forget);
 $("send-review").addEventListener("click", () => send("review"));
 $("send-release").addEventListener("click", () => send("release"));
 document.addEventListener("visibilitychange", () => { if (!document.hidden && token) load(false); });
-// A plain token from the first version of this page: offer to encrypt it, then it is removed.
-if (!store.get(VAULT) && store.get(OLD)) { $("tok").value = store.get(OLD); }
-lock();
+if (!store.get(VAULT) && !store.get(TOK) && store.get(OLD)) store.set(TOK, store.get(OLD));   // the first version's key
+if (store.get(TOK)) { token = store.get(TOK); start(); } else lock();
 </script>
 </body>
 </html>
