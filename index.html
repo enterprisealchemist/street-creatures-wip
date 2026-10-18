@@ -342,7 +342,7 @@ async function fill(fig, s) {
     const u = imgCache[s.path];
     const media = /\.(webm|mp4)$/i.test(s.path) ? el("video", { src: u, controls: "", loop: "", muted: "", playsinline: "" })
       : /\.(ogg|wav|mp3)$/i.test(s.path) ? el("audio", { src: u, controls: "" }) : el("img", { src: u, alt: s.cap || s.path });
-    fig.replaceChildren(media, s.cap ? el("figcaption", {}, s.cap) : null);
+    fig.replaceChildren(media, ...(s.cap ? [el("figcaption", {}, s.cap)] : []));   // replaceChildren prints a null as "null"
   } catch (e) { fig.replaceChildren(el("div", { class: "err" }, `Capture ${s.path} did not load (${e.message}).`)); }
 }
 
