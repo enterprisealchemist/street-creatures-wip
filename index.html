@@ -336,7 +336,11 @@ async function shot(s) {
     if (!imgCache[s.path]) {
       const r = await gh(`/repos/${REPO}/contents/${s.path.split("/").map(encodeURIComponent).join("/")}?ref=master`, { headers: { Accept: "application/vnd.github.raw+json" } });
       if (!r.ok) throw new Error(r.status);
-      imgCache[s.path] = URL.createObjectURL(await r.blob());
+      // GitHub labels raw files application/vnd.github.raw+json; Safari will not show an image under that type
+      const ext = (s.path.split(".").pop() || "").toLowerCase();
+      const type = { png: "image/png", gif: "image/gif", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", webm: "video/webm",
+        mp4: "video/mp4", ogg: "audio/ogg", wav: "audio/wav", mp3: "audio/mpeg" }[ext] || "application/octet-stream";
+      imgCache[s.path] = URL.createObjectURL(new Blob([await r.blob()], { type }));
     }
     const u = imgCache[s.path];
     const media = /\.(webm|mp4)$/i.test(s.path) ? el("video", { src: u, controls: "", loop: "", muted: "", playsinline: "" })
