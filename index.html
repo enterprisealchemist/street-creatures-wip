@@ -190,7 +190,7 @@
 
 <script>
 const REPO = "enterprisealchemist/street-creatures";
-const RELAY = "enterprisealchemist/street-creatures-wip";   // relay.yml there fires the routines (tokens are its secrets)
+const INBOX = { review: 1478, release: 1477 };   // draft "never merge" PRs in REPO; a comment wakes the session subscribed to it (Top Cat, Garfield)
 const API = "https://api.github.com";
 const LIVE = ["progress", "todo", "ready", "review", "park", "proposal"];
 const ACTIVE = ["progress", "todo", "ready", "review"];
@@ -374,14 +374,12 @@ async function send(kind) {
   const word = (t) => (t.labels.find((l) => l.startsWith("vito-")) || "").slice(5);
   const text = items.map((t) => `#${t.num} ${t.id}: ${word(t)}`).join("\n");
   try {
-    const r = await fetch(`${API}/repos/${RELAY}/actions/workflows/relay.yml/dispatches`, { method: "POST",
+    const r = await fetch(`${API}/repos/${REPO}/issues/${INBOX[kind]}/comments`, { method: "POST",
       headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + token, "X-GitHub-Api-Version": "2022-11-28" },
-      body: JSON.stringify({ ref: "main", inputs: { to: kind === "review" ? "topcat" : "garfield", issues: text } }) });
-    if (r.status !== 204) {
+      body: JSON.stringify({ body: `Vito pressed Send on the ${kind === "review" ? "Review" : "Release"} tab. Read the newest "Vito: … (WIP page)" comment on each issue and act on it:\n\n${text}` }) });
+    if (r.status !== 201) {
       const why = ((await r.json().catch(() => ({}))).message || "").slice(0, 160);
-      // street-creatures-wip is public, so any token can read it; running its workflow needs it on the token's list
-      const hint = r.status === 403 || r.status === 404 ? " The token needs street-creatures-wip under Repository access and Actions: Read and write." : "";
-      throw new Error(`GitHub said ${r.status}${why ? ` ("${why}")` : ""}.${hint}`);
+      throw new Error(`GitHub said ${r.status}${why ? ` ("${why}")` : ""}.`);
     }
     const s = sent();
     for (const t of items) s[kind + ":" + t.num + ":" + t.labels.find((l) => l.startsWith("vito-"))] = stamp();
