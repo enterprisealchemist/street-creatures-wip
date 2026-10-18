@@ -94,11 +94,13 @@
   .card.done { border-left: 4px solid var(--ok); } .card.done.neg { border-left-color: var(--bad); }
   .card .hd { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: baseline; }
   .card .ttl { font-weight: 600; font-size: 15px; }
-  .card .body { font-size: 13px; overflow-wrap: anywhere; max-height: 420px; overflow: auto; border-top: 1px solid var(--line); padding-top: 8px; }
+  .card .body { font-size: 13px; overflow-wrap: anywhere; border-top: 1px solid var(--line); padding-top: 8px; }
   .card .body img, .shots img { max-width: 100%; height: auto; image-rendering: pixelated; }
   .card .body pre { white-space: pre-wrap; }
   .shots { display: flex; flex-wrap: wrap; gap: 10px; }
   .shots figure { margin: 0; max-width: 100%; } .shots figcaption { font-size: 12px; color: var(--muted); }
+  .pick { display: flex; gap: 6px; align-items: center; margin: 4px 0 12px; } .pick .q { font-size: 12px; color: var(--muted); }
+  .pick button { min-width: 36px; font-weight: 600; } .pick button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
   .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .sendbar { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); padding: 10px 0; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
   details > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
@@ -402,18 +404,48 @@ function card(t, kind) {
   c.append(el("div", { class: "hd" }, el("span", { class: "ttl" }, title),
     el("span", {}, link(t), got ? el("span", { class: "pill " + got.slice(5) }, got.slice(5)) : null,
       el("span", { class: "meta" }, " · " + (t.owner || "?") + (isRev ? "" : " · " + (t.closed ? "merged " + fmtIdle(hrs(t.closed)) + " ago" : "open"))))));
+  let say = () => "";   // the question picks as "picks Q1B, Q2A" (Review cards only)
   if (isRev) {
     const b = el("div", { class: "body" }); b.innerHTML = t.bodyHtml;   // GitHub's own sanitised render
     b.querySelectorAll("pre").forEach((p) => { if (p.textContent.trim().startsWith("status:") || /^\s*(owner|status|next|priority):/m.test(p.textContent)) p.remove(); });
     b.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener"; });
-    // The Capture: lines are shown as images below, not as text
+    // A question ("**Q1, …** A: … B: …") gets a button per option under its pictures; the picks go in the verdict comment
+    const picks = drafts["p" + t.num] || (drafts["p" + t.num] = {});
+    const letters = (txt) => [...new Set([...txt.matchAll(/(?:^|[\s(.;])([A-F]):\s/g)].map((m) => m[1]))].sort();
+    const bold = (e) => { const st = e.firstElementChild; return st && st.nodeName === "STRONG" && e.textContent.trimStart().startsWith(st.textContent.trim()) ? st.textContent.trim() : ""; };
+    const qs = [...b.children].map((e) => ({ e, m: /^Q(\d+)\b/.exec(bold(e)) })).filter((x) => x.m)
+      .map((x) => ({ e: x.e, q: "Q" + x.m[1], opts: letters(x.e.textContent) })).filter((x) => x.opts.length > 1);
+    // Each Capture: line becomes its picture in place, so a question's pictures sit under that question
     const walk = document.createTreeWalker(b, NodeFilter.SHOW_TEXT), cut = [];
-    while (walk.nextNode()) if (/^\s*Capture:\s*\S+/.test(walk.currentNode.nodeValue)) cut.push(walk.currentNode);
-    for (const n of cut) { const nx = n.nextSibling; if (nx && nx.nodeName === "BR") nx.remove(); const par = n.parentNode; n.remove();
-      if (par !== b && par.nodeName === "P" && !par.textContent.trim()) par.remove(); }
+    while (walk.nextNode()) { const m = /^\s*Capture:\s*(\S+)\s*(?:\|\s*(.*?))?\s*$/.exec(walk.currentNode.nodeValue); if (m) cut.push([walk.currentNode, { path: m[1], cap: m[2] || "" }]); }
+    for (const [n, s] of cut) {
+      let prev = n.previousSibling;
+      while (prev && (prev.nodeName === "BR" || (prev.nodeType === 3 && !prev.nodeValue.trim()))) { const pp = prev.previousSibling; prev.remove(); prev = pp; }
+      let row = prev && prev.classList && prev.classList.contains("shots") ? prev : null;
+      if (!row) { row = el("div", { class: "shots" }); n.parentNode.insertBefore(row, n); }
+      shot(s, row); n.remove();
+    }
+    say = () => { const k = Object.entries(picks).map(([q, l]) => q === "Pick" ? l : q + l).join(", "); return k ? "picks " + k : ""; };
+    const pickRow = (q, opts) => {
+      const r = el("div", { class: "pick" }, el("span", { class: "q" }, q === "Pick" ? "Pick:" : q + ":"));
+      for (const l of opts) {
+        const btn = el("button", { type: "button", class: picks[q] === l ? "on" : null, "aria-pressed": String(picks[q] === l) }, l);
+        btn.addEventListener("click", () => {
+          if (picks[q] === l) delete picks[q]; else picks[q] = l;
+          r.querySelectorAll("button").forEach((x) => { const on = picks[q] === x.textContent; x.classList.toggle("on", on); x.setAttribute("aria-pressed", String(on)); });
+          msg.textContent = say() ? "Approve sends " + say() + "." : "";
+        });
+        r.append(btn);
+      }
+      return r;
+    };
+    for (const { e, q, opts } of qs) {   // under the question's last picture: before the next bold-led block
+      let at = e.nextElementSibling;
+      while (at && !bold(at) && !/^(H\d|HR)$/.test(at.nodeName)) at = at.nextElementSibling;
+      b.insertBefore(pickRow(q, opts), at);
+    }
     c.append(b);
-    const caps = [...t.rest.matchAll(/^Capture:\s*(\S+)\s*(?:\|\s*(.*))?$/gm)].map((m) => ({ path: m[1], cap: m[2] || "" }));
-    if (caps.length) { const shots = el("div", { class: "shots" }); c.append(shots); caps.forEach((s) => shot(s, shots)); }
+    if (!qs.length && letters(b.textContent).length > 1 && cut.length) c.append(pickRow("Pick", letters(b.textContent)));
   } else {
     if (t.note.where) c.append(el("div", { class: "note" }, "Where: " + t.note.where));
     if (t.note.summary.length) c.append(el("div", {}, t.note.summary.join(" ")));
@@ -431,7 +463,8 @@ function card(t, kind) {
   const go = async (v) => {
     if (v === no && !isRev && !ta.value.trim()) { msg.textContent = "Say what to fix first."; ta.focus(); return; }
     ok.disabled = bad.disabled = true; msg.textContent = "Writing to the ticket…";
-    try { await verdict(t, kind, v[0], v[1], both, ta.value.trim()); ta.value = ""; delete drafts[t.num]; renderCards(true); }
+    const note = [say(), ta.value.trim()].filter(Boolean).join(" — ");
+    try { await verdict(t, kind, v[0], v[1], both, note); ta.value = ""; delete drafts[t.num]; delete drafts["p" + t.num]; renderCards(true); }
     catch (e) { msg.textContent = "Not saved: " + e.message + ". Your comment is still here."; ok.disabled = bad.disabled = false; }
   };
   ok.addEventListener("click", () => go(yes)); bad.addEventListener("click", () => go(no));
