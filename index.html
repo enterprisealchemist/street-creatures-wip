@@ -563,11 +563,19 @@ function start() {
   load(true); clearInterval(timer); timer = setInterval(() => { if (!document.hidden) load(false); }, 60000);
 }
 $("setup-go").addEventListener("click", async () => {
-  const t = $("tok").value.trim(), a = $("pw1").value, b = $("pw2").value, err = $("setup-err");
+  const t = $("tok").value.replace(/\s+/g, ""), a = $("pw1").value, b = $("pw2").value, err = $("setup-err");
   err.hidden = true;
   if (!t) { err.textContent = "Paste the token."; err.hidden = false; return; }
   if (a.length < 8) { err.textContent = "Use a password of 8 characters or more."; err.hidden = false; return; }
   if (a !== b) { err.textContent = "The two passwords differ."; err.hidden = false; return; }
+  // Test the token first, so a bad paste is caught here rather than after it is stored.
+  const r = await fetch(`${API}/repos/${REPO}`, { headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + t } }).catch(() => null);
+  if (!r || !r.ok) {
+    err.textContent = !r ? "Could not reach GitHub; check the connection." : r.status === 401
+      ? `GitHub refused this token (401): it is mistyped, cut short, expired or revoked. It starts github_pat_ and is about 93 characters (this one is ${t.length}).`
+      : `GitHub said ${r.status}: the token works but cannot see ${REPO}; give it access to that repo.`;
+    err.hidden = false; return;
+  }
   await seal(t, a); store.del(OLD);
   token = t; $("tok").value = $("pw1").value = $("pw2").value = ""; start();
 });
