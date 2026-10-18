@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Street Creatures WIP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+  /* Layout: one column, summary first (nudges), then people, then the full lists. Reads the board issues live. */
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --fg: #1d1c1a; --muted: #6b675f; --line: #dedad2;
+    --accent: #3a5ccc; --ok: #2f7d4f; --warn: #b7791f; --bad: #c0392b;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --panel: #1e1e1c; --fg: #ecebe7; --muted: #9a968d; --line: #33322f;
+            --accent: #8aa2f0; --ok: #5fbf86; --warn: #e0a64a; --bad: #ef6f61; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  main { display: flex; flex-direction: column; gap: 28px; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--sans); }
+  .wrap { max-width: 1200px; margin: 0 auto; padding-block: 20px 48px;
+          padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+          display: flex; flex-direction: column; gap: 28px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .02em; }
+  h2 { font-size: 15px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 12px; max-width: 70ch; }
+  .status { font-family: var(--mono); font-size: 12px; color: var(--muted); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; font-size: 12px; color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+           border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button:disabled { opacity: .5; cursor: default; }
+  input { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .tile .lab { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .tile .num { font-family: var(--mono); font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .nudges { display: flex; flex-direction: column; gap: 6px; }
+  .nudge { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--warn); border-radius: 6px;
+           padding: 8px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; }
+  .nudge.bad { border-left-color: var(--bad); }
+  .nudge .why { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
+  .people { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 10px; }
+  .person { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+            display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .person.quiet { opacity: .65; }
+  .person .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .person .nm { font-weight: 600; text-transform: capitalize; }
+  .meta { font-family: var(--mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .person ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .person li { padding-left: 8px; border-left: 2px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
+  .person li.warn { border-left-color: var(--warn); } .person li.bad { border-left-color: var(--bad); }
+  .person li .d { color: var(--muted); display: block; }
+  .tk { font-family: var(--mono); font-weight: 600; }
+  a.tk { color: var(--fg); text-decoration: none; } a.tk:hover { color: var(--accent); text-decoration: underline; }
+  .pill { display: inline-block; font-size: 11px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); margin-left: 4px; white-space: nowrap; }
+  .pill.progress { color: var(--ok); border-color: var(--ok); }
+  .pill.park { color: var(--warn); border-color: var(--warn); }
+  .pill.review { color: var(--accent); border-color: var(--accent); }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+       padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td.n { font-family: var(--mono); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.nx { color: var(--muted); min-width: 240px; }
+  tr.warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); } tr.bad td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
+  .prio { display: flex; gap: 4px; align-items: center; }
+  .prio input { width: 56px; padding: 2px 6px; font-family: var(--mono); text-align: right; }
+  .gate { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
+  .gate .row { display: flex; gap: 8px; flex-wrap: wrap; } .gate input { flex: 1 1 280px; font-family: var(--mono); }
+  .err { color: var(--bad); font-size: 13px; }
+  .empty { color: var(--muted); font-size: 13px; }
+  @media (prefers-reduced-motion: no-preference) { .fresh { animation: flash .8s ease-out; } @keyframes flash { from { background: color-mix(in srgb, var(--accent) 18%, transparent); } } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Street Creatures · Work in Progress</h1>
+    <div class="status"><span id="stamp">Not loaded</span><button id="reload" type="button">Refresh now</button><button id="forget" type="button">Forget token</button></div>
+  </header>
+
+  <section id="gate" class="gate" hidden>
+    <h2>Connect to the board</h2>
+    <p class="sub">The board lives in the private street-creatures repo, so this page needs a GitHub fine-grained token with access to that repo only: Issues read (and Issues write to change priorities). It stays in this browser and is sent only to api.github.com.</p>
+    <div class="row"><input id="token" type="password" autocomplete="off" placeholder="github_pat_…" aria-label="GitHub token"><button id="save" type="button">Connect</button></div>
+    <div id="gate-err" class="err" hidden></div>
+  </section>
+
+  <main id="main" hidden>
+    <section id="summary"><div class="tiles" id="tiles"></div></section>
+
+    <section id="nudge">
+      <h2>Needs a nudge</h2>
+      <p class="sub">In flight with no activity for 4 h or more (red past 24 h), or with nobody named next.</p>
+      <div class="nudges" id="nudges"></div>
+    </section>
+
+    <section id="team">
+      <h2>Team</h2>
+      <p class="sub">Each ticket sits with whoever its next= line names, since they act next.</p>
+      <div class="people" id="people"></div>
+    </section>
+
+    <section id="flight">
+      <h2>In flight</h2>
+      <p class="sub">Being worked, todo, in review, parked or proposed; longest idle first.</p>
+      <div class="scroll"><table><thead><tr><th>Ticket</th><th>Status</th><th>Owner</th><th>Next</th><th>Doing</th><th>Idle</th></tr></thead><tbody id="flight-rows"></tbody></table></div>
+    </section>
+
+    <section id="backlog">
+      <h2>Backlog</h2>
+      <p class="sub">Approved and not started, in the order <span class="tk">board.py next</span> pulls them (lower number first). Change a number, or move a ticket up or down; it writes the ticket's priority and leaves a note on it.</p>
+      <div id="backlog-err" class="err" hidden></div>
+      <div class="scroll"><table><thead><tr><th>Priority</th><th>Ticket</th><th>Owner</th><th>Can pull</th><th>Title</th><th>Idle</th></tr></thead><tbody id="backlog-rows"></tbody></table></div>
+    </section>
+  </main>
+</div>
+
+<script>
+const REPO = "enterprisealchemist/street-creatures";
+const API = "https://api.github.com";
+const LIVE = ["progress", "todo", "review", "park", "proposal"];
+const KEY = "sc-wip-token";
+const $ = (id) => document.getElementById(id);
+let token = null, tickets = [], etag = null, timer = null, busy = false;
+
+try { token = localStorage.getItem(KEY); } catch (e) {}
+
+function el(tag, attrs, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) { if (v != null) n.setAttribute(k, v); }
+  for (const k of kids) n.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  return n;
+}
+const hrs = (iso) => (Date.now() - Date.parse(iso)) / 36e5;
+const fmtIdle = (h) => h < 1 ? Math.round(h * 60) + " m" : h < 48 ? h.toFixed(1) + " h" : (h / 24).toFixed(1) + " d";
+const ageClass = (h) => h >= 24 ? "bad" : h >= 4 ? "warn" : null;
+const link = (t) => el("a", { class: "tk", href: t.url, target: "_blank", rel: "noopener" }, t.id);
+
+// Same format board.py writes: title "id: title", body opens with a ```board block of "key: value" lines.
+const HEAD = /^```board\n([\s\S]*?)\n```\n?/;
+function parse(issue) {
+  const i = issue.title.indexOf(": ");
+  const id = i < 0 ? issue.title : issue.title.slice(0, i);
+  const h = {};
+  const m = HEAD.exec(issue.body || "");
+  if (m) for (const line of m[1].split("\n")) { const j = line.indexOf(": "); if (j > 0) h[line.slice(0, j).trim()] = line.slice(j + 2); }
+  const next = h.next || "";
+  const c = next.indexOf(":");
+  return {
+    id, num: issue.number, url: issue.html_url, title: i < 0 ? "" : issue.title.slice(i + 2),
+    status: h.status || "backlog", owner: h.owner || "", can: h.can || "", blocked: h.blocked || "",
+    priority: /^\d+$/.test(h.priority || "") ? Number(h.priority) : 99,
+    nextWho: c > 0 && !next.slice(0, c).includes(" ") ? next.slice(0, c).trim().toLowerCase() : "",
+    next: c > 0 && !next.slice(0, c).includes(" ") ? next.slice(c + 1).trim() : next,
+    idle: hrs(issue.updated_at),
+  };
+}
+
+async function gh(path, opts = {}) {
+  const r = await fetch(API + path, { ...opts, headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + token,
+    "X-GitHub-Api-Version": "2022-11-28", ...(opts.headers || {}) } });
+  if (r.status === 401) throw Object.assign(new Error("GitHub refused the token (401). Paste a new one."), { auth: true });
+  if (r.status === 403 || r.status === 404) throw new Error(`GitHub said ${r.status} for ${path.split("?")[0]}: the token needs access to ${REPO} with Issues permission.`);
+  return r;
+}
+
+async function load(force) {
+  if (busy) return; busy = true;
+  try {
+    let page = 1, all = [], first = true;
+    for (;;) {
+      const r = await gh(`/repos/${REPO}/issues?labels=board&state=open&per_page=100&page=${page}`,
+        first && etag && !force ? { headers: { "If-None-Match": etag } } : {});
+      if (r.status === 304) { render(); return; }               // unchanged: no rate cost, just re-age the idle times
+      if (!r.ok) throw new Error(`GitHub said ${r.status}.`);
+      if (first) etag = r.headers.get("ETag");
+      first = false;
+      const rows = await r.json();
+      all = all.concat(rows.filter((x) => !x.pull_request));
+      if (rows.length < 100) break;
+      page += 1;
+    }
+    tickets = all.map(parse);
+    render();
+  } catch (e) {
+    if (e.auth) { forget(); $("gate-err").textContent = e.message; $("gate-err").hidden = false; }
+    else $("stamp").textContent = "Load failed: " + e.message;
+  } finally { busy = false; }
+}
+
+function render() {
+  $("stamp").textContent = `${tickets.length} open tickets · checked ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · every minute`;
+  tickets.forEach((t) => (t.idleNow = t.idle));
+  const live = tickets.filter((t) => LIVE.includes(t.status));
+
+  const count = (s) => tickets.filter((t) => t.status === s).length;
+  $("tiles").replaceChildren(...[["Being worked", "progress"], ["In review", "review"], ["Todo", "todo"], ["Parked", "park"],
+    ["Proposals", "proposal"], ["Backlog", "backlog"], ["Landed, open", "landed"]].map(([lab, s]) =>
+    el("div", { class: "tile" }, el("div", { class: "lab" }, lab), el("div", { class: "num" }, count(s)))));
+
+  const nudges = live.filter((t) => t.status !== "park" && t.status !== "proposal" && (t.idle >= 4 || !t.nextWho))
+    .concat(live.filter((t) => (t.status === "park" || t.status === "proposal") && (t.idle >= 24 || !t.nextWho)))
+    .sort((a, b) => b.idle - a.idle);
+  $("nudges").replaceChildren(...(nudges.length ? nudges.map((t) => {
+    const why = !t.nextWho ? "No one named next" : `${t.nextWho} has not touched it for ${fmtIdle(t.idle)}`;
+    return el("div", { class: "nudge" + (t.idle >= 24 || !t.nextWho ? " bad" : "") },
+      el("div", {}, link(t), el("span", { class: "pill " + t.status }, t.status), " ", t.title),
+      el("div", { class: "meta" }, fmtIdle(t.idle)),
+      el("div", { class: "why" }, why + (t.next ? " · " + t.next : "")));
+  }) : [el("div", { class: "empty" }, "Nothing stalled.")]));
+
+  const by = {};
+  const who = (n) => (by[n] = by[n] || { name: n, acting: [], waiting: 0, backlog: 0 });
+  for (const t of tickets) {
+    if (t.status === "backlog") { if (t.owner) who(t.owner).backlog += 1; continue; }
+    if (!LIVE.includes(t.status)) continue;
+    const w = t.nextWho || t.owner;
+    if (w) who(w).acting.push(t);
+    if (t.owner && t.owner !== w) who(t.owner).waiting += 1;
+  }
+  const rank = { progress: 0, todo: 1, review: 2, proposal: 3, park: 4 };
+  const people = Object.values(by).sort((a, b) => b.acting.length - a.acting.length || a.name.localeCompare(b.name));
+  $("people").replaceChildren(...people.map((p) => {
+    const card = el("div", { class: "person" + (p.acting.length ? "" : " quiet") },
+      el("div", { class: "hd" }, el("span", { class: "nm" }, p.name), el("span", { class: "meta" }, `${p.acting.length} to act on · ${p.backlog} backlog`)));
+    if (p.acting.length) {
+      card.append(el("ul", {}, ...p.acting.sort((a, b) => rank[a.status] - rank[b.status] || a.idle - b.idle).map((t) =>
+        el("li", { class: ageClass(t.idle) }, link(t), el("span", { class: "pill " + t.status }, t.status),
+          el("span", { class: "d" }, `${t.next || t.title} · idle ${fmtIdle(t.idle)}`)))));
+    } else card.append(el("div", { class: "empty" }, p.waiting ? `Waiting on others for ${p.waiting}` : "Nothing in flight"));
+    if (p.acting.length && p.waiting) card.append(el("div", { class: "meta" }, `Also owns ${p.waiting} waiting on others`));
+    return card;
+  }));
+
+  $("flight-rows").replaceChildren(...live.slice().sort((a, b) => b.idle - a.idle).map((t) =>
+    el("tr", { class: ageClass(t.idle) }, el("td", {}, link(t)), el("td", {}, el("span", { class: "pill " + t.status }, t.status)),
+      el("td", {}, t.owner), el("td", {}, t.nextWho || "—"), el("td", { class: "nx" }, t.next), el("td", { class: "n" }, fmtIdle(t.idle)))));
+
+  const back = tickets.filter((t) => t.status === "backlog").sort((a, b) => a.priority - b.priority || a.num - b.num);
+  $("backlog-rows").replaceChildren(...back.map((t, i) => {
+    const inp = el("input", { type: "number", min: "0", step: "1", value: t.priority, "aria-label": "Priority of " + t.id, id: "p-" + t.id });
+    inp.addEventListener("change", () => { const v = Number(inp.value); if (Number.isInteger(v) && v >= 0 && v !== t.priority) setPriority(t, v); });
+    const up = el("button", { type: "button", "aria-label": "Move " + t.id + " up" }, "↑");
+    const dn = el("button", { type: "button", "aria-label": "Move " + t.id + " down" }, "↓");
+    if (i === 0) up.disabled = true; else up.addEventListener("click", () => setPriority(t, Math.max(0, back[i - 1].priority - 1)));
+    if (i === back.length - 1) dn.disabled = true; else dn.addEventListener("click", () => setPriority(t, back[i + 1].priority + 1));
+    return el("tr", {}, el("td", {}, el("div", { class: "prio" }, inp, up, dn)), el("td", {}, link(t)), el("td", {}, t.owner),
+      el("td", {}, t.can), el("td", {}, t.title + (t.blocked ? ` [blocked: ${t.blocked}]` : "")), el("td", { class: "n" }, fmtIdle(t.idle)));
+  }));
+}
+
+// Writes the priority line exactly as board.py set would: re-read the issue first so a concurrent edit is never overwritten.
+async function setPriority(t, v) {
+  const err = $("backlog-err"); err.hidden = true;
+  try {
+    const cur = await (await gh(`/repos/${REPO}/issues/${t.num}`)).json();
+    const m = HEAD.exec(cur.body || "");
+    if (!m) throw new Error(`${t.id} has no board block; change it with board.py.`);
+    const now = new Date().toISOString().slice(0, 16).replace("T", " ") + "Z";
+    let block = m[1];
+    const old = (/^priority: (.*)$/m.exec(block) || [])[1] || "";
+    block = /^priority: /m.test(block) ? block.replace(/^priority: .*$/m, "priority: " + v) : block + "\npriority: " + v;
+    block = /^updated: /m.test(block) ? block.replace(/^updated: .*$/m, "updated: " + now) : block + "\nupdated: " + now;
+    const body = "```board\n" + block + "\n```\n" + cur.body.slice(m[0].length);
+    let r = await gh(`/repos/${REPO}/issues/${t.num}`, { method: "PATCH", body: JSON.stringify({ body }) });
+    if (!r.ok) throw new Error(`saving ${t.id} failed (${r.status}).`);
+    await gh(`/repos/${REPO}/issues/${t.num}/comments`, { method: "POST",
+      body: JSON.stringify({ body: `- ${now} Vito: priority ${old || "?"} -> ${v} (WIP page)` }) });
+    await load(true);
+    const row = $("p-" + t.id); if (row) row.closest("tr").classList.add("fresh");
+  } catch (e) { err.textContent = "Priority not changed: " + e.message; err.hidden = false; }
+}
+
+function forget() {
+  token = null; etag = null; tickets = [];
+  try { localStorage.removeItem(KEY); } catch (e) {}
+  clearInterval(timer); $("main").hidden = true; $("gate").hidden = false;
+}
+function start() {
+  $("gate").hidden = true; $("gate-err").hidden = true; $("main").hidden = false;
+  load(true); clearInterval(timer); timer = setInterval(() => { if (!document.hidden) load(false); }, 60000);
+}
+$("save").addEventListener("click", () => {
+  const v = $("token").value.trim(); if (!v) return;
+  token = v; try { localStorage.setItem(KEY, v); } catch (e) {}
+  $("token").value = ""; start();
+});
+$("token").addEventListener("keydown", (e) => { if (e.key === "Enter") $("save").click(); });
+$("reload").addEventListener("click", () => token && load(true));
+$("forget").addEventListener("click", forget);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && token) load(false); });
+if (token) start(); else forget();
+</script>
+</body>
+</html>
