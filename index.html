@@ -377,12 +377,8 @@ async function send(kind) {
       body: JSON.stringify({ ref: "main", inputs: { to: kind === "review" ? "topcat" : "garfield", issues: text } }) });
     if (r.status !== 204) {
       const why = ((await r.json().catch(() => ({}))).message || "").slice(0, 160);
-      let hint = "";
-      if (r.status === 403 || r.status === 404) {   // can the token see the relay repo at all?
-        const v = await fetch(`${API}/repos/${RELAY}`, { headers: { Authorization: "Bearer " + token } }).catch(() => null);
-        hint = !v || !v.ok ? " The token cannot see street-creatures-wip: add that repository to the token."
-          : " The token sees street-creatures-wip but may not run its workflows: set Actions to Read and write.";
-      }
+      // street-creatures-wip is public, so any token can read it; running its workflow needs it on the token's list
+      const hint = r.status === 403 || r.status === 404 ? " The token needs street-creatures-wip under Repository access and Actions: Read and write." : "";
       throw new Error(`GitHub said ${r.status}${why ? ` ("${why}")` : ""}.${hint}`);
     }
     const s = sent();
