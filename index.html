@@ -290,7 +290,7 @@ async function load(force) {
 
 // ---- Review: open proposals, rendered by GitHub (sanitised HTML) ----
 async function loadReview() {
-  proposals = (await pages(`/repos/${REPO}/issues?labels=board,status:proposal&state=open`, "application/vnd.github.html+json")).map(parse);
+  proposals = (await pages(`/repos/${REPO}/issues?labels=board,status:proposal&state=open`, "application/vnd.github.full+json")).map(parse);
 }
 // ---- Release: issues with a release note ("Release:" comment, label release-note), newest first ----
 const relCache = {};
