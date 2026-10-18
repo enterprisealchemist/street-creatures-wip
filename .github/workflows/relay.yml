@@ -1,0 +1,39 @@
+# Send on the WIP page dispatches this. It fires one routine (Top Cat for Review, Garfield for Release).
+# The routine tokens are this repo's secrets; inputs carry only "#<issue> <ticket>: <verdict>" lines,
+# never comment text, because this repo and its logs are public. The routine reads the comments on the issues.
+name: relay
+on:
+  workflow_dispatch:
+    inputs:
+      to:
+        description: topcat or garfield
+        required: true
+        type: choice
+        options: [topcat, garfield]
+      issues:
+        description: issue lines
+        required: true
+permissions: {}
+jobs:
+  fire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Fire the routine
+        env:
+          TO: ${{ inputs.to }}
+          ISSUES: ${{ inputs.issues }}
+          T_TOPCAT: ${{ secrets.TOPCAT_ROUTINE_TOKEN }}
+          U_TOPCAT: ${{ secrets.TOPCAT_ROUTINE_URL }}
+          T_GARFIELD: ${{ secrets.GARFIELD_ROUTINE_TOKEN }}
+          U_GARFIELD: ${{ secrets.GARFIELD_ROUTINE_URL }}
+        run: |
+          if printf '%s\n' "$ISSUES" | grep -Eqv '^#[0-9]+ [A-Za-z0-9._-]+: (approved|rejected|good|fix)$'; then echo "bad input line"; exit 1; fi
+          if [ "$TO" = topcat ]; then URL=$U_TOPCAT; TOK=$T_TOPCAT; else URL=$U_GARFIELD; TOK=$T_GARFIELD; fi
+          [ -n "$TOK" ] && [ -n "$URL" ] || { echo "token or URL secret for $TO is not set"; exit 1; }
+          case "$URL" in https://api.anthropic.com/*/fire) ;; *) echo "URL secret for $TO is not a routine /fire URL"; exit 1;; esac
+          body=$(jq -n --arg t "$ISSUES" '{text:$t}')
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$URL" \
+            -H "Authorization: Bearer $TOK" -H 'anthropic-beta: experimental-cc-routine-2026-04-01' \
+            -H 'anthropic-version: 2023-06-01' -H 'Content-Type: application/json' -d "$body")
+          echo "HTTP $code"; [ "$code" = 200 ]

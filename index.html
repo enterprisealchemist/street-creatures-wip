@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
 <style>
-  /* Layout: one column, summary first (nudges), then people, then the full lists. Reads the board issues live. */
+  /* Four tabs over the live board issues: Team (hierarchy), Board, Review (proposals), Release (shipped notes). */
   :root {
     --bg: #f6f5f2; --panel: #ffffff; --fg: #1d1c1a; --muted: #6b675f; --line: #dedad2;
     --accent: #3a5ccc; --ok: #2f7d4f; --warn: #b7791f; --bad: #c0392b;
@@ -20,11 +20,11 @@
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
-  main { display: flex; flex-direction: column; gap: 28px; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--sans); }
   .wrap { max-width: 1200px; margin: 0 auto; padding-block: 20px 48px;
           padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
-          display: flex; flex-direction: column; gap: 28px; }
+          display: flex; flex-direction: column; gap: 20px; }
+  .panel { display: flex; flex-direction: column; gap: 28px; }
   header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
   h1 { font-size: 20px; margin: 0; letter-spacing: .02em; }
   h2 { font-size: 15px; margin: 0 0 4px; }
@@ -33,9 +33,16 @@
   button { font: inherit; font-size: 12px; color: var(--fg); background: var(--panel); border: 1px solid var(--line);
            border-radius: 6px; padding: 3px 9px; cursor: pointer; }
   button:hover { border-color: var(--accent); }
-  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   button:disabled { opacity: .5; cursor: default; }
-  input { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: 6px 14px; font-size: 13px; }
+  button.go { border-color: var(--ok); color: var(--ok); } button.no { border-color: var(--bad); color: var(--bad); }
+  input, textarea { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  textarea { width: 100%; min-height: 38px; resize: vertical; font-size: 13px; }
+  nav.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+  nav.tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; font-size: 14px; padding: 8px 12px; color: var(--muted); white-space: nowrap; }
+  nav.tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+  .count { font-family: var(--mono); font-size: 11px; margin-left: 4px; padding: 0 6px; border-radius: 999px; background: var(--line); color: var(--fg); }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
   .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
   .tile .lab { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
@@ -45,23 +52,14 @@
            padding: 8px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; }
   .nudge.bad { border-left-color: var(--bad); }
   .nudge .why { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
-  .people { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 10px; }
-  .person { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
-            display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-  .person.quiet { opacity: .65; }
-  .person .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
-  .person .nm { font-weight: 600; text-transform: capitalize; }
   .meta { font-family: var(--mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .person ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-  .person li { padding-left: 8px; border-left: 2px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
-  .person li.warn { border-left-color: var(--warn); } .person li.bad { border-left-color: var(--bad); }
-  .person li .d { color: var(--muted); display: block; }
   .tk { font-family: var(--mono); font-weight: 600; }
   a.tk { color: var(--fg); text-decoration: none; } a.tk:hover { color: var(--accent); text-decoration: underline; }
   .pill { display: inline-block; font-size: 11px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); margin-left: 4px; white-space: nowrap; }
-  .pill.progress { color: var(--ok); border-color: var(--ok); }
+  .pill.progress, .pill.approved, .pill.good { color: var(--ok); border-color: var(--ok); }
   .pill.park { color: var(--warn); border-color: var(--warn); }
-  .pill.review { color: var(--accent); border-color: var(--accent); }
+  .pill.review, .pill.ready { color: var(--accent); border-color: var(--accent); }
+  .pill.rejected, .pill.fix { color: var(--bad); border-color: var(--bad); }
   .scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
   th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
@@ -76,7 +74,34 @@
   .gate { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
   .gate .row { display: flex; gap: 8px; flex-wrap: wrap; } .gate input { flex: 1 1 280px; font-family: var(--mono); }
   .err { color: var(--bad); font-size: 13px; }
+  .note { color: var(--muted); font-size: 13px; }
   .empty { color: var(--muted); font-size: 13px; }
+  /* Team: one tree, leads with their workers indented under them */
+  .tree { display: flex; flex-direction: column; gap: 10px; }
+  .tree .kids { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-left: 18px; padding-left: 12px; border-left: 2px solid var(--line); }
+  .node { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .node.quiet { opacity: .7; }
+  .node .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .node .nm { font-weight: 600; } .node .role { color: var(--muted); font-size: 12px; }
+  .node ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+  .node li { padding-left: 8px; border-left: 2px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
+  .node li.warn { border-left-color: var(--warn); } .node li.bad { border-left-color: var(--bad); }
+  .node li .d { color: var(--muted); display: block; }
+  .branch { display: flex; flex-direction: column; gap: 10px; }
+  /* Review and Release cards */
+  .cards { display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .card.done { border-left: 4px solid var(--ok); } .card.done.neg { border-left-color: var(--bad); }
+  .card .hd { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+  .card .ttl { font-weight: 600; font-size: 15px; }
+  .card .body { font-size: 13px; overflow-wrap: anywhere; max-height: 420px; overflow: auto; border-top: 1px solid var(--line); padding-top: 8px; }
+  .card .body img, .shots img { max-width: 100%; height: auto; image-rendering: pixelated; }
+  .card .body pre { white-space: pre-wrap; }
+  .shots { display: flex; flex-wrap: wrap; gap: 10px; }
+  .shots figure { margin: 0; max-width: 100%; } .shots figcaption { font-size: 12px; color: var(--muted); }
+  .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .sendbar { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); padding: 10px 0; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  details > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   @media (prefers-reduced-motion: no-preference) { .fresh { animation: flash .8s ease-out; } @keyframes flash { from { background: color-mix(in srgb, var(--accent) 18%, transparent); } } }
 </style>
 </head>
@@ -84,66 +109,128 @@
 <div class="wrap">
   <header>
     <h1>Street Creatures · Work in Progress</h1>
-    <div class="status"><span id="stamp">Not loaded</span><button id="reload" type="button">Refresh now</button><button id="forget" type="button">Forget token</button></div>
+    <div class="status"><span id="stamp">Locked</span><button id="reload" type="button" hidden>Refresh now</button><button id="lock" type="button" hidden>Lock</button></div>
   </header>
 
-  <section id="gate" class="gate" hidden>
-    <h2>Connect to the board</h2>
-    <p class="sub">The board lives in the private street-creatures repo, so this page needs a GitHub fine-grained token with access to that repo only: Issues read (and Issues write to change priorities). It stays in this browser and is sent only to api.github.com.</p>
-    <div class="row"><input id="token" type="password" autocomplete="off" placeholder="github_pat_…" aria-label="GitHub token"><button id="save" type="button">Connect</button></div>
-    <div id="gate-err" class="err" hidden></div>
+  <!-- Setup: token + password, encrypted into this browser. Unlock: password only. -->
+  <section id="setup" class="gate" hidden>
+    <h2>Set up this browser</h2>
+    <p class="sub">Paste your GitHub fine-grained token (street-creatures: Issues read and write, Contents read; street-creatures-wip: Actions read and write)
+      and choose a password. The token is encrypted with the password before it is stored, so the stored copy is useless without it. Nothing leaves this browser except calls to api.github.com.</p>
+    <div class="row"><input id="tok" type="password" autocomplete="off" placeholder="github_pat_…" aria-label="GitHub token"></div>
+    <div class="row"><input id="pw1" type="password" autocomplete="new-password" placeholder="Password" aria-label="Password">
+      <input id="pw2" type="password" autocomplete="new-password" placeholder="Password again" aria-label="Password again"></div>
+    <div class="row"><button id="setup-go" class="primary" type="button">Encrypt and open</button></div>
+    <div id="setup-err" class="err" hidden></div>
+  </section>
+  <section id="unlock" class="gate" hidden>
+    <h2>Unlock</h2>
+    <div class="row"><input id="pw" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password"><button id="unlock-go" class="primary" type="button">Unlock</button></div>
+    <div id="unlock-err" class="err" hidden></div>
+    <p class="note">Forgot it? <button id="reset" type="button">Forget the stored token</button> and set up again with a token.</p>
   </section>
 
-  <main id="main" hidden>
-    <section id="summary"><div class="tiles" id="tiles"></div></section>
+  <div id="app" hidden>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="team" type="button">Team</button>
+      <button role="tab" data-tab="board" type="button">Board</button>
+      <button role="tab" data-tab="review" type="button">Review<span class="count" id="n-review">0</span></button>
+      <button role="tab" data-tab="release" type="button">Release<span class="count" id="n-release">0</span></button>
+    </nav>
 
-    <section id="nudge">
-      <h2>Needs a nudge</h2>
-      <p class="sub">In flight with no activity for 4 h or more (red past 24 h), or with nobody named next.</p>
-      <div class="nudges" id="nudges"></div>
+    <section class="panel" id="tab-team" hidden>
+      <div>
+        <h2>Team</h2>
+        <p class="sub">Who leads whom, and each person's active tickets (being worked, todo, ready, in review; parked shown dimmed). A ticket sits with its owner.</p>
+        <div class="tree" id="tree"></div>
+      </div>
     </section>
 
-    <section id="team">
-      <h2>Team</h2>
-      <p class="sub">Each ticket sits with whoever its next= line names, since they act next.</p>
-      <div class="people" id="people"></div>
+    <section class="panel" id="tab-board" hidden>
+      <section><div class="tiles" id="tiles"></div></section>
+      <section>
+        <h2>Needs a nudge</h2>
+        <p class="sub">In flight with no activity for 4 h or more (red past 24 h), or with nobody named next.</p>
+        <div class="nudges" id="nudges"></div>
+      </section>
+      <section>
+        <h2>In flight</h2>
+        <p class="sub">Being worked, todo, ready, in review, parked or proposed; longest idle first.</p>
+        <div class="scroll"><table><thead><tr><th>Ticket</th><th>Status</th><th>Owner</th><th>Next</th><th>Doing</th><th>Idle</th></tr></thead><tbody id="flight-rows"></tbody></table></div>
+      </section>
+      <section>
+        <h2>Backlog</h2>
+        <p class="sub">Approved and not started, in the order <span class="tk">board.py next</span> pulls them (lower number first). Change a number, or move a ticket up or down; it writes the ticket's priority and leaves a note on it.</p>
+        <div id="backlog-err" class="err" hidden></div>
+        <div class="scroll"><table><thead><tr><th>Priority</th><th>Ticket</th><th>Owner</th><th>Can pull</th><th>Title</th><th>Idle</th></tr></thead><tbody id="backlog-rows"></tbody></table></div>
+      </section>
     </section>
 
-    <section id="flight">
-      <h2>In flight</h2>
-      <p class="sub">Being worked, todo, in review, parked or proposed; longest idle first.</p>
-      <div class="scroll"><table><thead><tr><th>Ticket</th><th>Status</th><th>Owner</th><th>Next</th><th>Doing</th><th>Idle</th></tr></thead><tbody id="flight-rows"></tbody></table></div>
+    <section class="panel" id="tab-review" hidden>
+      <div>
+        <h2>Proposals waiting on you</h2>
+        <p class="sub">Approve or reject each one: your verdict and comment go on its GitHub issue straight away. Then send the batch once; Top Cat gets one message with all of them.</p>
+        <div class="cards" id="review-cards"></div>
+      </div>
+      <div class="sendbar"><button id="send-review" class="primary" type="button" disabled>Send to Top Cat</button><span class="note" id="send-review-note"></span></div>
     </section>
 
-    <section id="backlog">
-      <h2>Backlog</h2>
-      <p class="sub">Approved and not started, in the order <span class="tk">board.py next</span> pulls them (lower number first). Change a number, or move a ticket up or down; it writes the ticket's priority and leaves a note on it.</p>
-      <div id="backlog-err" class="err" hidden></div>
-      <div class="scroll"><table><thead><tr><th>Priority</th><th>Ticket</th><th>Owner</th><th>Can pull</th><th>Title</th><th>Idle</th></tr></thead><tbody id="backlog-rows"></tbody></table></div>
+    <section class="panel" id="tab-release" hidden>
+      <div>
+        <h2>Shipped, waiting on your look</h2>
+        <p class="sub">Merged, player-visible changes with their capture. Mark each good or fix (with a comment): it goes on the ticket straight away. Then send the batch once to Garfield, who turns each fix into a ticket.</p>
+        <div class="cards" id="release-cards"></div>
+        <details id="release-old"><summary>Reviewed in the last 7 days</summary><div class="cards" id="release-done"></div></details>
+      </div>
+      <div class="sendbar"><button id="send-release" class="primary" type="button" disabled>Send to Garfield</button><span class="note" id="send-release-note"></span></div>
     </section>
-  </main>
+  </div>
 </div>
 
 <script>
 const REPO = "enterprisealchemist/street-creatures";
+const RELAY = "enterprisealchemist/street-creatures-wip";   // relay.yml there fires the routines (tokens are its secrets)
 const API = "https://api.github.com";
-const LIVE = ["progress", "todo", "review", "park", "proposal"];
-const KEY = "sc-wip-token";
+const LIVE = ["progress", "todo", "ready", "review", "park", "proposal"];
+const ACTIVE = ["progress", "todo", "ready", "review"];
+const VAULT = "sc-wip-vault", OLD = "sc-wip-token", TAB = "sc-wip-tab", SENT = "sc-wip-sent";
 const $ = (id) => document.getElementById(id);
 let token = null, tickets = [], etag = null, timer = null, busy = false;
-
-try { token = localStorage.getItem(KEY); } catch (e) {}
+let proposals = [], releases = [], relDone = [];
+const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+                del(k) { try { localStorage.removeItem(k); } catch (e) {} } };
 
 function el(tag, attrs, ...kids) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) { if (v != null) n.setAttribute(k, v); }
-  for (const k of kids) n.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  for (const k of kids) if (k != null) n.append(k instanceof Node ? k : document.createTextNode(String(k)));
   return n;
 }
 const hrs = (iso) => (Date.now() - Date.parse(iso)) / 36e5;
 const fmtIdle = (h) => h < 1 ? Math.round(h * 60) + " m" : h < 48 ? h.toFixed(1) + " h" : (h / 24).toFixed(1) + " d";
 const ageClass = (h) => h >= 24 ? "bad" : h >= 4 ? "warn" : null;
 const link = (t) => el("a", { class: "tk", href: t.url, target: "_blank", rel: "noopener" }, t.id);
+const stamp = () => new Date().toISOString().slice(0, 16).replace("T", " ") + "Z";
+
+// ---- the lock: AES-GCM with a PBKDF2 key from the password; only {salt, iv, ciphertext} is stored ----
+const b64 = (u) => btoa(String.fromCharCode(...new Uint8Array(u)));
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+async function keyFrom(pw, salt) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 600000, hash: "SHA-256" }, base,
+    { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function seal(tok, pw) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await keyFrom(pw, salt), new TextEncoder().encode(tok));
+  store.set(VAULT, JSON.stringify({ v: 1, salt: b64(salt), iv: b64(iv), ct: b64(ct) }));
+}
+async function open_(pw) {
+  const v = JSON.parse(store.get(VAULT));
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(v.iv) }, await keyFrom(pw, unb64(v.salt)), unb64(v.ct));
+  return new TextDecoder().decode(pt);
+}
 
 // Same format board.py writes: title "id: title", body opens with a ```board block of "key: value" lines.
 const HEAD = /^```board\n([\s\S]*?)\n```\n?/;
@@ -157,59 +244,249 @@ function parse(issue) {
   const c = next.indexOf(":");
   return {
     id, num: issue.number, url: issue.html_url, title: i < 0 ? "" : issue.title.slice(i + 2),
-    status: h.status || "backlog", owner: h.owner || "", can: h.can || "", blocked: h.blocked || "",
+    status: h.status || "backlog", owner: (h.owner || "").toLowerCase(), can: h.can || "", blocked: h.blocked || "",
     priority: /^\d+$/.test(h.priority || "") ? Number(h.priority) : 99,
     nextWho: c > 0 && !next.slice(0, c).includes(" ") ? next.slice(0, c).trim().toLowerCase() : "",
     next: c > 0 && !next.slice(0, c).includes(" ") ? next.slice(c + 1).trim() : next,
-    idle: hrs(issue.updated_at),
+    idle: hrs(issue.updated_at), labels: (issue.labels || []).map((l) => l.name),
+    bodyHtml: issue.body_html || "", rest: m ? (issue.body || "").slice(m[0].length) : (issue.body || ""),
+    closed: issue.closed_at,
   };
 }
 
 async function gh(path, opts = {}) {
   const r = await fetch(API + path, { ...opts, headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + token,
     "X-GitHub-Api-Version": "2022-11-28", ...(opts.headers || {}) } });
-  if (r.status === 401) throw Object.assign(new Error("GitHub refused the token (401). Paste a new one."), { auth: true });
-  if (r.status === 403 || r.status === 404) throw new Error(`GitHub said ${r.status} for ${path.split("?")[0]}: the token needs access to ${REPO} with Issues permission.`);
+  if (r.status === 401) throw Object.assign(new Error("GitHub refused the token (401). Set up again with a new token."), { auth: true });
+  if (r.status === 403 || r.status === 404) throw new Error(`GitHub said ${r.status} for ${path.split("?")[0]}: check the token's repo access and permissions.`);
   return r;
+}
+async function pages(path, accept) {
+  let page = 1, all = [];
+  for (;;) {
+    const r = await gh(`${path}&per_page=100&page=${page}`, accept ? { headers: { Accept: accept } } : {});
+    if (!r.ok) throw new Error(`GitHub said ${r.status}.`);
+    const rows = await r.json();
+    all = all.concat(rows.filter((x) => !x.pull_request));
+    if (rows.length < 100) return all;
+    page += 1;
+  }
 }
 
 async function load(force) {
   if (busy) return; busy = true;
   try {
-    let page = 1, all = [], first = true;
-    for (;;) {
-      const r = await gh(`/repos/${REPO}/issues?labels=board&state=open&per_page=100&page=${page}`,
-        first && etag && !force ? { headers: { "If-None-Match": etag } } : {});
-      if (r.status === 304) { render(); return; }               // unchanged: no rate cost, just re-age the idle times
-      if (!r.ok) throw new Error(`GitHub said ${r.status}.`);
-      if (first) etag = r.headers.get("ETag");
-      first = false;
-      const rows = await r.json();
-      all = all.concat(rows.filter((x) => !x.pull_request));
-      if (rows.length < 100) break;
-      page += 1;
+    let changed = true;
+    const r = await gh(`/repos/${REPO}/issues?labels=board&state=open&per_page=100&page=1`, !force && etag ? { headers: { "If-None-Match": etag } } : {});
+    if (r.status === 304) changed = false;                  // unchanged: no rate cost, just re-age the idle times
+    else if (!r.ok) throw new Error(`GitHub said ${r.status}.`);
+    if (changed) {
+      etag = r.headers.get("ETag");
+      const first = (await r.json()).filter((x) => !x.pull_request);
+      const rest = first.length === 100 ? await pages(`/repos/${REPO}/issues?labels=board&state=open`).then((a) => a.slice(100)) : [];
+      tickets = first.concat(rest).map(parse);
+      await loadReview(); await loadRelease();
     }
-    tickets = all.map(parse);
     render();
   } catch (e) {
-    if (e.auth) { forget(); $("gate-err").textContent = e.message; $("gate-err").hidden = false; }
+    if (e.auth) { store.del(VAULT); lock(); $("setup-err").textContent = e.message; $("setup-err").hidden = false; }
     else $("stamp").textContent = "Load failed: " + e.message;
   } finally { busy = false; }
 }
 
-function render() {
-  $("stamp").textContent = `${tickets.length} open tickets · checked ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · every minute`;
-  tickets.forEach((t) => (t.idleNow = t.idle));
-  const live = tickets.filter((t) => LIVE.includes(t.status));
+// ---- Review: open proposals, rendered by GitHub (sanitised HTML) ----
+async function loadReview() {
+  proposals = (await pages(`/repos/${REPO}/issues?labels=board,status:proposal&state=open`, "application/vnd.github.html+json")).map(parse);
+}
+// ---- Release: issues with a release note ("Release:" comment, label release-note), newest first ----
+const relCache = {};
+async function loadRelease() {
+  const since = new Date(Date.now() - 14 * 864e5).toISOString();
+  const rows = (await pages(`/repos/${REPO}/issues?labels=release-note&state=all&since=${since}&sort=updated`)).map(parse);
+  for (const t of rows) {
+    const key = t.num + "@" + t.idle.toFixed(3);
+    if (!relCache[t.num] || relCache[t.num].key !== key) {
+      const cs = await (await gh(`/repos/${REPO}/issues/${t.num}/comments?per_page=100`)).json();
+      const note = cs.filter((c) => /^Release:/.test(c.body || "")).pop();
+      relCache[t.num] = { key, note: note ? parseNote(note.body) : null };
+    }
+    t.note = relCache[t.num].note;
+  }
+  const seen = (t) => t.labels.includes("vito-good") || t.labels.includes("vito-fix");
+  releases = rows.filter((t) => t.note && !seen(t));
+  relDone = rows.filter((t) => t.note && seen(t) && t.idle < 7 * 24);
+}
+// Release: <title> / Where: <where> / <summary lines> / Capture: <repo path> [| caption]
+function parseNote(body) {
+  const n = { title: "", where: "", summary: [], shots: [] };
+  for (const line of body.split("\n")) {
+    let m;
+    if ((m = /^Release:\s*(.*)$/.exec(line))) n.title = m[1];
+    else if ((m = /^Where:\s*(.*)$/.exec(line))) n.where = m[1];
+    else if ((m = /^Capture:\s*(\S+)\s*(?:\|\s*(.*))?$/.exec(line))) n.shots.push({ path: m[1], cap: m[2] || "" });
+    else if (line.trim() && !line.startsWith("---") && !line.startsWith("_Generated")) n.summary.push(line);
+  }
+  return n;
+}
+// Captures live in the private repo: fetched with the token, shown as object URLs.
+const imgCache = {};
+async function shot(s) {
+  const fig = el("figure", {}, el("div", { class: "note" }, "Loading " + s.path));
+  try {
+    if (!imgCache[s.path]) {
+      const r = await gh(`/repos/${REPO}/contents/${s.path.split("/").map(encodeURIComponent).join("/")}?ref=master`, { headers: { Accept: "application/vnd.github.raw+json" } });
+      if (!r.ok) throw new Error(r.status);
+      imgCache[s.path] = URL.createObjectURL(await r.blob());
+    }
+    const u = imgCache[s.path];
+    const media = /\.(webm|mp4)$/i.test(s.path) ? el("video", { src: u, controls: "", loop: "", muted: "", playsinline: "" })
+      : /\.(ogg|wav|mp3)$/i.test(s.path) ? el("audio", { src: u, controls: "" }) : el("img", { src: u, alt: s.cap || s.path });
+    fig.replaceChildren(media, s.cap ? el("figcaption", {}, s.cap) : null);
+  } catch (e) { fig.replaceChildren(el("div", { class: "err" }, `Capture ${s.path} did not load (${e.message}).`)); }
+  return fig;
+}
 
+// ---- verdicts: comment + label on the issue now; the batch Send fires one routine later ----
+const sent = () => { try { return JSON.parse(store.get(SENT) || "{}"); } catch (e) { return {}; } };
+async function verdict(t, kind, word, label, drop, comment) {
+  const body = `Vito: ${word}${comment ? " — " + comment : ""} (WIP page)`;
+  let r = await gh(`/repos/${REPO}/issues/${t.num}/comments`, { method: "POST", body: JSON.stringify({ body }) });
+  if (!r.ok) throw new Error(`comment failed (${r.status})`);
+  const cur = await (await gh(`/repos/${REPO}/issues/${t.num}`)).json();
+  const labels = cur.labels.map((l) => l.name).filter((l) => !drop.includes(l)).concat(label);
+  r = await gh(`/repos/${REPO}/issues/${t.num}`, { method: "PATCH", body: JSON.stringify({ labels }) });
+  if (!r.ok) throw new Error(`label failed (${r.status})`);
+  t.labels = labels; t.verdict = word;
+}
+function pending(kind) {
+  const s = sent();
+  const list = kind === "review" ? proposals : releases.concat(relDone);
+  const tag = kind === "review" ? ["vito-approved", "vito-rejected"] : ["vito-good", "vito-fix"];
+  return list.filter((t) => tag.some((l) => t.labels.includes(l)) && !s[kind + ":" + t.num + ":" + tag.find((l) => t.labels.includes(l))]);
+}
+async function send(kind) {
+  const btn = $("send-" + kind), note = $(`send-${kind}-note`);
+  const items = pending(kind);
+  if (!items.length) return;
+  btn.disabled = true; note.textContent = "Sending…";
+  const word = (t) => (t.labels.find((l) => l.startsWith("vito-")) || "").slice(5);
+  const text = items.map((t) => `#${t.num} ${t.id}: ${word(t)}`).join("\n");
+  try {
+    const r = await gh(`/repos/${RELAY}/actions/workflows/relay.yml/dispatches`, { method: "POST",
+      body: JSON.stringify({ ref: "main", inputs: { to: kind === "review" ? "topcat" : "garfield", issues: text } }) });
+    if (r.status !== 204) throw new Error(`GitHub said ${r.status}`);
+    const s = sent();
+    for (const t of items) s[kind + ":" + t.num + ":" + t.labels.find((l) => l.startsWith("vito-"))] = stamp();
+    store.set(SENT, JSON.stringify(s));
+    note.textContent = `Sent ${items.length} at ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`;
+  } catch (e) { note.textContent = "Not sent: " + e.message + ". Your verdicts are already on the tickets; try Send again."; }
+  renderCards();
+}
+
+function card(t, kind) {
+  const isRev = kind === "review";
+  const yes = isRev ? ["approved", "vito-approved"] : ["good", "vito-good"];
+  const no = isRev ? ["rejected", "vito-rejected"] : ["fix", "vito-fix"];
+  const both = [yes[1], no[1]];
+  const got = t.labels.find((l) => both.includes(l));
+  const c = el("article", { class: "card" + (got ? " done" + (got === no[1] ? " neg" : "") : "") });
+  const title = isRev ? t.title : (t.note.title || t.title);
+  c.append(el("div", { class: "hd" }, el("span", { class: "ttl" }, title),
+    el("span", {}, link(t), got ? el("span", { class: "pill " + got.slice(5) }, got.slice(5)) : null,
+      el("span", { class: "meta" }, " · " + (t.owner || "?") + (isRev ? "" : " · " + (t.closed ? "merged " + fmtIdle(hrs(t.closed)) + " ago" : "open"))))));
+  if (isRev) {
+    const b = el("div", { class: "body" }); b.innerHTML = t.bodyHtml;   // GitHub's own sanitised render
+    b.querySelectorAll("pre").forEach((p) => { if (p.textContent.trim().startsWith("status:") || /^\s*(owner|status|next|priority):/m.test(p.textContent)) p.remove(); });
+    b.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener"; });
+    c.append(b);
+  } else {
+    if (t.note.where) c.append(el("div", { class: "note" }, "Where: " + t.note.where));
+    if (t.note.summary.length) c.append(el("div", {}, t.note.summary.join(" ")));
+    const shots = el("div", { class: "shots" }); c.append(shots);
+    t.note.shots.forEach((s) => shot(s).then((f) => shots.append(f)));
+    if (!t.note.shots.length) shots.append(el("div", { class: "err" }, "No capture on this note."));
+  }
+  const ta = el("textarea", { placeholder: isRev ? "Comment (optional; say what to change if rejecting)" : "Comment (say what to fix)", "aria-label": "Comment on " + t.id });
+  const ok = el("button", { class: "go", type: "button" }, isRev ? "Approve" : "Good");
+  const bad = el("button", { class: "no", type: "button" }, isRev ? "Reject" : "Fix");
+  const msg = el("span", { class: "note" }, got ? `On the ticket as ${got.slice(5)}. Pick again to change it.` : "");
+  const go = async (v) => {
+    if (v === no && !isRev && !ta.value.trim()) { msg.textContent = "Say what to fix first."; ta.focus(); return; }
+    ok.disabled = bad.disabled = true; msg.textContent = "Writing to the ticket…";
+    try { await verdict(t, kind, v[0], v[1], both, ta.value.trim()); ta.value = ""; renderCards(); }
+    catch (e) { msg.textContent = "Not saved: " + e.message + ". Your comment is still here."; ok.disabled = bad.disabled = false; }
+  };
+  ok.addEventListener("click", () => go(yes)); bad.addEventListener("click", () => go(no));
+  c.append(ta, el("div", { class: "acts" }, ok, bad, msg));
+  return c;
+}
+function renderCards() {
+  const rev = $("review-cards");
+  rev.replaceChildren(...(proposals.length ? proposals.map((t) => card(t, "review")) : [el("div", { class: "empty" }, "No proposals waiting.")]));
+  $("release-cards").replaceChildren(...(releases.length ? releases.map((t) => card(t, "release")) : [el("div", { class: "empty" }, "Nothing new shipped.")]));
+  $("release-done").replaceChildren(...relDone.map((t) => card(t, "release")));
+  $("release-old").hidden = !relDone.length;
+  const open = (k) => k === "review" ? proposals.filter((t) => !t.labels.some((l) => l === "vito-approved" || l === "vito-rejected")).length : releases.length;
+  $("n-review").textContent = open("review"); $("n-release").textContent = open("release");
+  for (const k of ["review", "release"]) {
+    const n = pending(k).length;
+    $("send-" + k).disabled = !n;
+    $("send-" + k).textContent = (k === "review" ? "Send to Top Cat" : "Send to Garfield") + (n ? ` (${n})` : "");
+  }
+}
+
+// ---- Team: the hierarchy (CLAUDE.md "Who's who") ----
+const TEAM = [
+  ["vito", "Vito", "Owner, the gate", [["puss", "Puss in Boots", "Executive Producer, backstop", []]]],
+  ["tc", "Top Cat", "Product Owner", [
+    ["felix", "Felix", "Technical Director", [["sylvester", "Sylvester", "gameplay (subagent)", []], ["heathcliff", "Heathcliff", "perf (subagent)", []]]],
+    ["fritz", "Fritz", "Art Director", [["azrael", "Azrael", "production art (subagent)", []], ["figaro", "Figaro", "detail art (subagent)", []]]],
+  ]],
+  ["garfield", "Garfield", "Scrum Master, budget, itch", [["sc", "Scat Cat", "audio (subagent)", []], ["cheshire", "Cheshire", "copy (subagent)", []]]],
+];
+const ALIAS = { topcat: "tc", "top cat": "tc", scatcat: "sc", "scat cat": "sc" };
+function node([id, name, role], mine) {
+  const act = mine.filter((t) => ACTIVE.includes(t.status)), park = mine.filter((t) => t.status === "park" || t.status === "proposal");
+  const back = mine.filter((t) => t.status === "backlog").length;
+  const n = el("div", { class: "node" + (act.length ? "" : " quiet") },
+    el("div", { class: "hd" }, el("span", {}, el("span", { class: "nm" }, name), " ", el("span", { class: "role" }, role)),
+      el("span", { class: "meta" }, `${act.length} active · ${back} backlog`)));
+  const rank = { progress: 0, todo: 1, ready: 2, review: 3, proposal: 4, park: 5 };
+  const items = act.concat(park).sort((a, b) => rank[a.status] - rank[b.status] || a.idle - b.idle);
+  if (items.length) n.append(el("ul", {}, ...items.map((t) => el("li", { class: ACTIVE.includes(t.status) ? ageClass(t.idle) : null, style: ACTIVE.includes(t.status) ? null : "opacity:.6" },
+    link(t), el("span", { class: "pill " + t.status }, t.status), el("span", { class: "d" }, `${t.title} · idle ${fmtIdle(t.idle)}`)))));
+  else n.append(el("div", { class: "empty" }, "Nothing active"));
+  return n;
+}
+function renderTree() {
+  const by = {};
+  for (const t of tickets) { const o = ALIAS[t.owner] || t.owner || "?"; (by[o] = by[o] || []).push(t); }
+  const known = new Set();
+  const build = (spec) => {
+    known.add(spec[0]);
+    const kids = spec[3];
+    const me = node(spec, by[spec[0]] || []);
+    if (!kids.length) return me;
+    return el("div", { class: "branch" }, me, el("div", { class: "kids" }, ...kids.map(build)));
+  };
+  const parts = TEAM.map(build);
+  const other = Object.keys(by).filter((o) => !known.has(o)).sort();
+  if (other.length) parts.push(el("div", { class: "branch" }, el("h2", {}, "Not on the chart"), el("div", { class: "kids" },
+    ...other.map((o) => node([o, o === "pool" ? "Pool" : o, o === "pool" ? "unclaimed, anyone allowed by can=" : "owner id on the ticket", []], by[o])))));
+  $("tree").replaceChildren(...parts);
+}
+
+// ---- Board ----
+function renderBoard() {
+  const live = tickets.filter((t) => LIVE.includes(t.status));
   const count = (s) => tickets.filter((t) => t.status === s).length;
-  $("tiles").replaceChildren(...[["Being worked", "progress"], ["In review", "review"], ["Todo", "todo"], ["Parked", "park"],
-    ["Proposals", "proposal"], ["Backlog", "backlog"], ["Landed, open", "landed"]].map(([lab, s]) =>
+  $("tiles").replaceChildren(...[["Being worked", "progress"], ["Todo", "todo"], ["Ready", "ready"], ["In review", "review"], ["Parked", "park"],
+    ["Proposals", "proposal"], ["Backlog", "backlog"]].map(([lab, s]) =>
     el("div", { class: "tile" }, el("div", { class: "lab" }, lab), el("div", { class: "num" }, count(s)))));
 
-  const nudges = live.filter((t) => t.status !== "park" && t.status !== "proposal" && (t.idle >= 4 || !t.nextWho))
-    .concat(live.filter((t) => (t.status === "park" || t.status === "proposal") && (t.idle >= 24 || !t.nextWho)))
-    .sort((a, b) => b.idle - a.idle);
+  const quiet = (t) => t.status === "park" || t.status === "proposal";
+  const nudges = live.filter((t) => !quiet(t) && (t.idle >= 4 || !t.nextWho))
+    .concat(live.filter((t) => quiet(t) && (t.idle >= 24 || !t.nextWho))).sort((a, b) => b.idle - a.idle);
   $("nudges").replaceChildren(...(nudges.length ? nudges.map((t) => {
     const why = !t.nextWho ? "No one named next" : `${t.nextWho} has not touched it for ${fmtIdle(t.idle)}`;
     return el("div", { class: "nudge" + (t.idle >= 24 || !t.nextWho ? " bad" : "") },
@@ -217,29 +494,6 @@ function render() {
       el("div", { class: "meta" }, fmtIdle(t.idle)),
       el("div", { class: "why" }, why + (t.next ? " · " + t.next : "")));
   }) : [el("div", { class: "empty" }, "Nothing stalled.")]));
-
-  const by = {};
-  const who = (n) => (by[n] = by[n] || { name: n, acting: [], waiting: 0, backlog: 0 });
-  for (const t of tickets) {
-    if (t.status === "backlog") { if (t.owner) who(t.owner).backlog += 1; continue; }
-    if (!LIVE.includes(t.status)) continue;
-    const w = t.nextWho || t.owner;
-    if (w) who(w).acting.push(t);
-    if (t.owner && t.owner !== w) who(t.owner).waiting += 1;
-  }
-  const rank = { progress: 0, todo: 1, review: 2, proposal: 3, park: 4 };
-  const people = Object.values(by).sort((a, b) => b.acting.length - a.acting.length || a.name.localeCompare(b.name));
-  $("people").replaceChildren(...people.map((p) => {
-    const card = el("div", { class: "person" + (p.acting.length ? "" : " quiet") },
-      el("div", { class: "hd" }, el("span", { class: "nm" }, p.name), el("span", { class: "meta" }, `${p.acting.length} to act on · ${p.backlog} backlog`)));
-    if (p.acting.length) {
-      card.append(el("ul", {}, ...p.acting.sort((a, b) => rank[a.status] - rank[b.status] || a.idle - b.idle).map((t) =>
-        el("li", { class: ageClass(t.idle) }, link(t), el("span", { class: "pill " + t.status }, t.status),
-          el("span", { class: "d" }, `${t.next || t.title} · idle ${fmtIdle(t.idle)}`)))));
-    } else card.append(el("div", { class: "empty" }, p.waiting ? `Waiting on others for ${p.waiting}` : "Nothing in flight"));
-    if (p.acting.length && p.waiting) card.append(el("div", { class: "meta" }, `Also owns ${p.waiting} waiting on others`));
-    return card;
-  }));
 
   $("flight-rows").replaceChildren(...live.slice().sort((a, b) => b.idle - a.idle).map((t) =>
     el("tr", { class: ageClass(t.idle) }, el("td", {}, link(t)), el("td", {}, el("span", { class: "pill " + t.status }, t.status)),
@@ -258,6 +512,11 @@ function render() {
   }));
 }
 
+function render() {
+  $("stamp").textContent = `${tickets.length} open tickets · checked ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · every minute`;
+  renderTree(); renderBoard(); renderCards();
+}
+
 // Writes the priority line exactly as board.py set would: re-read the issue first so a concurrent edit is never overwritten.
 async function setPriority(t, v) {
   const err = $("backlog-err"); err.hidden = true;
@@ -265,13 +524,13 @@ async function setPriority(t, v) {
     const cur = await (await gh(`/repos/${REPO}/issues/${t.num}`)).json();
     const m = HEAD.exec(cur.body || "");
     if (!m) throw new Error(`${t.id} has no board block; change it with board.py.`);
-    const now = new Date().toISOString().slice(0, 16).replace("T", " ") + "Z";
+    const now = stamp();
     let block = m[1];
     const old = (/^priority: (.*)$/m.exec(block) || [])[1] || "";
     block = /^priority: /m.test(block) ? block.replace(/^priority: .*$/m, "priority: " + v) : block + "\npriority: " + v;
     block = /^updated: /m.test(block) ? block.replace(/^updated: .*$/m, "updated: " + now) : block + "\nupdated: " + now;
     const body = "```board\n" + block + "\n```\n" + cur.body.slice(m[0].length);
-    let r = await gh(`/repos/${REPO}/issues/${t.num}`, { method: "PATCH", body: JSON.stringify({ body }) });
+    const r = await gh(`/repos/${REPO}/issues/${t.num}`, { method: "PATCH", body: JSON.stringify({ body }) });
     if (!r.ok) throw new Error(`saving ${t.id} failed (${r.status}).`);
     await gh(`/repos/${REPO}/issues/${t.num}/comments`, { method: "POST",
       body: JSON.stringify({ body: `- ${now} Vito: priority ${old || "?"} -> ${v} (WIP page)` }) });
@@ -280,25 +539,51 @@ async function setPriority(t, v) {
   } catch (e) { err.textContent = "Priority not changed: " + e.message; err.hidden = false; }
 }
 
-function forget() {
-  token = null; etag = null; tickets = [];
-  try { localStorage.removeItem(KEY); } catch (e) {}
-  clearInterval(timer); $("main").hidden = true; $("gate").hidden = false;
+// ---- tabs, lock, unlock ----
+function tab(name) {
+  for (const b of document.querySelectorAll("nav.tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
+  for (const p of ["team", "board", "review", "release"]) $("tab-" + p).hidden = p !== name;
+  store.set(TAB, name);
+}
+document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("click", () => tab(b.dataset.tab)));
+
+function lock() {
+  token = null; etag = null; tickets = []; proposals = []; releases = []; relDone = [];
+  clearInterval(timer); $("app").hidden = true; $("reload").hidden = $("lock").hidden = true; $("stamp").textContent = "Locked";
+  const has = !!store.get(VAULT);
+  $("setup").hidden = has; $("unlock").hidden = !has;
+  (has ? $("pw") : $("tok")).focus();
 }
 function start() {
-  $("gate").hidden = true; $("gate-err").hidden = true; $("main").hidden = false;
+  $("setup").hidden = $("unlock").hidden = true; $("setup-err").hidden = $("unlock-err").hidden = true;
+  $("app").hidden = false; $("reload").hidden = $("lock").hidden = false;
+  tab(store.get(TAB) || "team");
   load(true); clearInterval(timer); timer = setInterval(() => { if (!document.hidden) load(false); }, 60000);
 }
-$("save").addEventListener("click", () => {
-  const v = $("token").value.trim(); if (!v) return;
-  token = v; try { localStorage.setItem(KEY, v); } catch (e) {}
-  $("token").value = ""; start();
+$("setup-go").addEventListener("click", async () => {
+  const t = $("tok").value.trim(), a = $("pw1").value, b = $("pw2").value, err = $("setup-err");
+  err.hidden = true;
+  if (!t) { err.textContent = "Paste the token."; err.hidden = false; return; }
+  if (a.length < 8) { err.textContent = "Use a password of 8 characters or more."; err.hidden = false; return; }
+  if (a !== b) { err.textContent = "The two passwords differ."; err.hidden = false; return; }
+  await seal(t, a); store.del(OLD);
+  token = t; $("tok").value = $("pw1").value = $("pw2").value = ""; start();
 });
-$("token").addEventListener("keydown", (e) => { if (e.key === "Enter") $("save").click(); });
+$("unlock-go").addEventListener("click", async () => {
+  const err = $("unlock-err"); err.hidden = true;
+  try { token = await open_($("pw").value); $("pw").value = ""; start(); }
+  catch (e) { err.textContent = "Wrong password."; err.hidden = false; }
+});
+for (const [i, b] of [["pw", "unlock-go"], ["pw2", "setup-go"]]) $(i).addEventListener("keydown", (e) => { if (e.key === "Enter") $(b).click(); });
+$("reset").addEventListener("click", () => { store.del(VAULT); lock(); });
 $("reload").addEventListener("click", () => token && load(true));
-$("forget").addEventListener("click", forget);
+$("lock").addEventListener("click", lock);
+$("send-review").addEventListener("click", () => send("review"));
+$("send-release").addEventListener("click", () => send("release"));
 document.addEventListener("visibilitychange", () => { if (!document.hidden && token) load(false); });
-if (token) start(); else forget();
+// A plain token from the first version of this page: offer to encrypt it, then it is removed.
+if (!store.get(VAULT) && store.get(OLD)) { $("tok").value = store.get(OLD); }
+lock();
 </script>
 </body>
 </html>
