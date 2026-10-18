@@ -379,7 +379,11 @@ async function send(kind) {
     for (const t of items) s[kind + ":" + t.num + ":" + t.labels.find((l) => l.startsWith("vito-"))] = stamp();
     store.set(SENT, JSON.stringify(s));
     note.textContent = `Sent ${items.length} at ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`;
-  } catch (e) { note.textContent = "Not sent: " + e.message + ". Your verdicts are already on the tickets; try Send again."; }
+  } catch (e) {
+    note.textContent = /\b40[34]\b/.test(e.message)
+      ? "Not sent: the token cannot run the relay. On GitHub, edit the token: add the street-creatures-wip repository and give it Actions: Read and write. Your verdicts are already on the tickets."
+      : "Not sent: " + e.message + ". Your verdicts are already on the tickets; try Send again.";
+  }
   renderCards();
 }
 
@@ -414,20 +418,28 @@ function card(t, kind) {
     if (!t.note.shots.length) shots.append(el("div", { class: "err" }, "No capture on this note."));
   }
   const ta = el("textarea", { placeholder: isRev ? "Comment (optional; say what to change if rejecting)" : "Comment (say what to fix)", "aria-label": "Comment on " + t.id });
+  ta.value = drafts[t.num] || "";   // the auto-refresh redraws cards; a half-typed comment survives it
+  ta.addEventListener("input", () => { drafts[t.num] = ta.value; });
+  ta.addEventListener("blur", () => setTimeout(() => { if (deferred) renderCards(); }, 400));   // after a button click lands
   const ok = el("button", { class: "go", type: "button" }, isRev ? "Approve" : "Good");
   const bad = el("button", { class: "no", type: "button" }, isRev ? "Reject" : "Fix");
   const msg = el("span", { class: "note" }, got ? `On the ticket as ${got.slice(5)}. Pick again to change it.` : "");
   const go = async (v) => {
     if (v === no && !isRev && !ta.value.trim()) { msg.textContent = "Say what to fix first."; ta.focus(); return; }
     ok.disabled = bad.disabled = true; msg.textContent = "Writing to the ticket…";
-    try { await verdict(t, kind, v[0], v[1], both, ta.value.trim()); ta.value = ""; renderCards(); }
+    try { await verdict(t, kind, v[0], v[1], both, ta.value.trim()); ta.value = ""; delete drafts[t.num]; renderCards(true); }
     catch (e) { msg.textContent = "Not saved: " + e.message + ". Your comment is still here."; ok.disabled = bad.disabled = false; }
   };
   ok.addEventListener("click", () => go(yes)); bad.addEventListener("click", () => go(no));
   c.append(ta, el("div", { class: "acts" }, ok, bad, msg));
   return c;
 }
-function renderCards() {
+const drafts = {};
+let deferred = false;
+function renderCards(force) {
+  // never redraw under someone typing: wait until the comment box loses focus
+  if (!force && document.activeElement && document.activeElement.tagName === "TEXTAREA") { deferred = true; return; }
+  deferred = false;
   const rev = $("review-cards");
   rev.replaceChildren(...(proposals.length ? proposals.map((t) => card(t, "review")) : [el("div", { class: "empty" }, "No proposals waiting.")]));
   $("release-cards").replaceChildren(...(releases.length ? releases.map((t) => card(t, "release")) : [el("div", { class: "empty" }, "Nothing new shipped.")]));
