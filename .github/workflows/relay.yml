@@ -1,6 +1,6 @@
 # Send on the WIP page dispatches this. It comments the batch on the recipient's inbox draft PR (Top Cat #4,
-# Garfield #3); each session is subscribed to its PR, so the comment wakes it. Inputs carry only
-# "#<issue> <ticket>: <verdict>" lines, never comment text, because this repo and its logs are public.
+# Garfield #3); each session is subscribed to its PR, so the comment wakes it. This repo is public, so the
+# comment carries only issue numbers and verdict words; the sessions read the notes on the private issues.
 name: relay
 on:
   workflow_dispatch:
@@ -28,6 +28,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           if printf '%s\n' "$ISSUES" | grep -Eqv '^#[0-9]+ [A-Za-z0-9._-]+: (approved|rejected|good|fix)$'; then echo "bad input line"; exit 1; fi
-          if [ "$TO" = topcat ]; then PR=4; TAB=Review; else PR=3; TAB=Release; fi
-          body=$(printf 'Vito pressed Send on the %s tab. Read the newest "Vito: … (WIP page)" comment on each issue in enterprisealchemist/street-creatures and act on it:\n\n%s\n' "$TAB" "$ISSUES")
+          if [ "$TO" = topcat ]; then PR=4; else PR=3; fi
+          lines=$(printf '%s\n' "$ISSUES" | sed -E 's/^(#[0-9]+) [^:]+: /\1 /')
+          body=$(printf 'Send: read the newest "Vito: … (WIP page)" comment on each issue and act on it.\n\n%s\n' "$lines")
           gh pr comment "$PR" -R "$REPO" --body "$body"
