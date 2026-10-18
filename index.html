@@ -173,7 +173,7 @@
         <p class="sub">Approve or reject each one: your verdict and comment go on its GitHub issue straight away. Then send the batch once; Top Cat gets one message with all of them.</p>
         <div class="cards" id="review-cards"></div>
       </div>
-      <div class="sendbar"><button id="send-review" class="primary" type="button" disabled>Send to Top Cat</button><span class="note" id="send-review-note"></span></div>
+      <div class="sendbar"><span class="note">Verdicts save to the tickets as you click. When you're done, tell Top Cat in chat.</span></div>
     </section>
 
     <section class="panel" id="tab-release" hidden>
@@ -183,18 +183,17 @@
         <div class="cards" id="release-cards"></div>
         <details id="release-old"><summary>Reviewed in the last 7 days</summary><div class="cards" id="release-done"></div></details>
       </div>
-      <div class="sendbar"><button id="send-release" class="primary" type="button" disabled>Send to Garfield</button><span class="note" id="send-release-note"></span></div>
+      <div class="sendbar"><span class="note">Verdicts save to the tickets as you click. When you're done, tell Garfield in chat.</span></div>
     </section>
   </div>
 </div>
 
 <script>
 const REPO = "enterprisealchemist/street-creatures";
-const INBOX = { review: 1478, release: 1477 };   // draft "never merge" PRs in REPO; a comment wakes the session subscribed to it (Top Cat, Garfield)
 const API = "https://api.github.com";
 const LIVE = ["progress", "todo", "ready", "review", "park", "proposal"];
 const ACTIVE = ["progress", "todo", "ready", "review"];
-const VAULT = "sc-wip-vault", OLD = "sc-wip-token", TOK = "sc-wip-gh", TAB = "sc-wip-tab", SENT = "sc-wip-sent";
+const VAULT = "sc-wip-vault", OLD = "sc-wip-token", TOK = "sc-wip-gh", TAB = "sc-wip-tab";
 const $ = (id) => document.getElementById(id);
 let token = null, tickets = [], etag = null, timer = null, busy = false;
 let proposals = [], releases = [], relDone = [];
@@ -348,8 +347,7 @@ async function fill(fig, s) {
   } catch (e) { fig.replaceChildren(el("div", { class: "err" }, `Capture ${s.path} did not load (${e.message}).`)); }
 }
 
-// ---- verdicts: comment + label on the issue now; the batch Send fires one routine later ----
-const sent = () => { try { return JSON.parse(store.get(SENT) || "{}"); } catch (e) { return {}; } };
+// ---- verdicts: comment + label on the issue; Vito tells Top Cat or Garfield in chat when he's done ----
 async function verdict(t, kind, word, label, drop, comment) {
   const body = `Vito: ${word}${comment ? " — " + comment : ""} (WIP page)`;
   let r = await gh(`/repos/${REPO}/issues/${t.num}/comments`, { method: "POST", body: JSON.stringify({ body }) });
@@ -360,37 +358,6 @@ async function verdict(t, kind, word, label, drop, comment) {
   if (!r.ok) throw new Error(`label failed (${r.status})`);
   t.labels = labels; t.verdict = word;
 }
-function pending(kind) {
-  const s = sent();
-  const list = kind === "review" ? proposals : releases.concat(relDone);
-  const tag = kind === "review" ? ["vito-approved", "vito-rejected"] : ["vito-good", "vito-fix"];
-  return list.filter((t) => tag.some((l) => t.labels.includes(l)) && !s[kind + ":" + t.num + ":" + tag.find((l) => t.labels.includes(l))]);
-}
-async function send(kind) {
-  const btn = $("send-" + kind), note = $(`send-${kind}-note`);
-  const items = pending(kind);
-  if (!items.length) return;
-  btn.disabled = true; note.textContent = "Sending…";
-  const word = (t) => (t.labels.find((l) => l.startsWith("vito-")) || "").slice(5);
-  const text = items.map((t) => `#${t.num} ${t.id}: ${word(t)}`).join("\n");
-  try {
-    const r = await fetch(`${API}/repos/${REPO}/issues/${INBOX[kind]}/comments`, { method: "POST",
-      headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + token, "X-GitHub-Api-Version": "2022-11-28" },
-      body: JSON.stringify({ body: `Vito pressed Send on the ${kind === "review" ? "Review" : "Release"} tab. Read the newest "Vito: … (WIP page)" comment on each issue and act on it:\n\n${text}` }) });
-    if (r.status !== 201) {
-      const why = ((await r.json().catch(() => ({}))).message || "").slice(0, 160);
-      throw new Error(`GitHub said ${r.status}${why ? ` ("${why}")` : ""}.`);
-    }
-    const s = sent();
-    for (const t of items) s[kind + ":" + t.num + ":" + t.labels.find((l) => l.startsWith("vito-"))] = stamp();
-    store.set(SENT, JSON.stringify(s));
-    note.textContent = `Sent ${items.length} at ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`;
-  } catch (e) {
-    note.textContent = "Not sent: " + e.message + " Your verdicts are already on the tickets; try Send again after fixing it.";
-  }
-  renderCards();
-}
-
 function card(t, kind) {
   const isRev = kind === "review";
   const yes = isRev ? ["approved", "vito-approved"] : ["good", "vito-good"];
@@ -482,11 +449,6 @@ function renderCards(force) {
   $("release-old").hidden = !relDone.length;
   const open = (k) => k === "review" ? proposals.filter((t) => !t.labels.some((l) => l === "vito-approved" || l === "vito-rejected")).length : releases.length;
   $("n-review").textContent = open("review"); $("n-release").textContent = open("release");
-  for (const k of ["review", "release"]) {
-    const n = pending(k).length;
-    $("send-" + k).disabled = !n;
-    $("send-" + k).textContent = (k === "review" ? "Send to Top Cat" : "Send to Garfield") + (n ? ` (${n})` : "");
-  }
 }
 
 // ---- Team: the hierarchy (CLAUDE.md "Who's who") ----
@@ -639,8 +601,6 @@ for (const [i, b] of [["pw", "unlock-go"], ["tok", "setup-go"]]) $(i).addEventLi
 $("reset").addEventListener("click", forget);
 $("reload").addEventListener("click", () => token && load(true));
 $("lock").addEventListener("click", forget);
-$("send-review").addEventListener("click", () => send("review"));
-$("send-release").addEventListener("click", () => send("release"));
 document.addEventListener("visibilitychange", () => { if (!document.hidden && token) load(false); });
 if (!store.get(VAULT) && !store.get(TOK) && store.get(OLD)) store.set(TOK, store.get(OLD));   // the first version's key
 if (store.get(TOK)) { token = store.get(TOK); start(); } else lock();
