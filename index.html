@@ -399,6 +399,8 @@ function card(t, kind) {
     b.querySelectorAll("pre").forEach((p) => { if (p.textContent.trim().startsWith("status:") || /^\s*(owner|status|next|priority):/m.test(p.textContent)) p.remove(); });
     b.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener"; });
     c.append(b);
+    const caps = [...t.rest.matchAll(/^Capture:\s*(\S+)\s*(?:\|\s*(.*))?$/gm)].map((m) => ({ path: m[1], cap: m[2] || "" }));
+    if (caps.length) { const shots = el("div", { class: "shots" }); c.append(shots); caps.forEach((s) => shot(s).then((f) => shots.append(f))); }
   } else {
     if (t.note.where) c.append(el("div", { class: "note" }, "Where: " + t.note.where));
     if (t.note.summary.length) c.append(el("div", {}, t.note.summary.join(" ")));
