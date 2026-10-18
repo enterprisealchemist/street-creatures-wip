@@ -372,17 +372,25 @@ async function send(kind) {
   const word = (t) => (t.labels.find((l) => l.startsWith("vito-")) || "").slice(5);
   const text = items.map((t) => `#${t.num} ${t.id}: ${word(t)}`).join("\n");
   try {
-    const r = await gh(`/repos/${RELAY}/actions/workflows/relay.yml/dispatches`, { method: "POST",
+    const r = await fetch(`${API}/repos/${RELAY}/actions/workflows/relay.yml/dispatches`, { method: "POST",
+      headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + token, "X-GitHub-Api-Version": "2022-11-28" },
       body: JSON.stringify({ ref: "main", inputs: { to: kind === "review" ? "topcat" : "garfield", issues: text } }) });
-    if (r.status !== 204) throw new Error(`GitHub said ${r.status}`);
+    if (r.status !== 204) {
+      const why = ((await r.json().catch(() => ({}))).message || "").slice(0, 160);
+      let hint = "";
+      if (r.status === 403 || r.status === 404) {   // can the token see the relay repo at all?
+        const v = await fetch(`${API}/repos/${RELAY}`, { headers: { Authorization: "Bearer " + token } }).catch(() => null);
+        hint = !v || !v.ok ? " The token cannot see street-creatures-wip: add that repository to the token."
+          : " The token sees street-creatures-wip but may not run its workflows: set Actions to Read and write.";
+      }
+      throw new Error(`GitHub said ${r.status}${why ? ` ("${why}")` : ""}.${hint}`);
+    }
     const s = sent();
     for (const t of items) s[kind + ":" + t.num + ":" + t.labels.find((l) => l.startsWith("vito-"))] = stamp();
     store.set(SENT, JSON.stringify(s));
     note.textContent = `Sent ${items.length} at ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`;
   } catch (e) {
-    note.textContent = /\b40[34]\b/.test(e.message)
-      ? "Not sent: the token cannot run the relay. On GitHub, edit the token: add the street-creatures-wip repository and give it Actions: Read and write. Your verdicts are already on the tickets."
-      : "Not sent: " + e.message + ". Your verdicts are already on the tickets; try Send again.";
+    note.textContent = "Not sent: " + e.message + " Your verdicts are already on the tickets; try Send again after fixing it.";
   }
   renderCards();
 }
