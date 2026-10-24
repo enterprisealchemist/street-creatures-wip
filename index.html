@@ -378,8 +378,18 @@ function card(t, kind) {
     const picks = drafts["p" + t.num] || (drafts["p" + t.num] = {});
     const letters = (txt) => [...new Set([...txt.matchAll(/(?:^|[\s(.;])([A-F]):\s/g)].map((m) => m[1]))].sort();
     const bold = (e) => { const st = e.firstElementChild; return st && st.nodeName === "STRONG" && e.textContent.trimStart().startsWith(st.textContent.trim()) ? st.textContent.trim() : ""; };
-    const qs = [...b.children].map((e) => ({ e, m: /^Q(\d+)\b/.exec(bold(e)) })).filter((x) => x.m)
-      .map((x) => ({ e: x.e, q: "Q" + x.m[1], opts: letters(x.e.textContent) })).filter((x) => x.opts.length > 1);
+    // Questions on <br>-joined lines of one paragraph ("Open questions:<br>**Q1, …**") become a paragraph each
+    b.querySelectorAll("p").forEach((p) => {
+      if (![...p.children].some((s) => s.nodeName === "STRONG" && /^Q\d+\b/.test(s.textContent.trim()) && s.previousSibling && /^BR$/.test((s.previousSibling.nodeType === 3 && !s.previousSibling.nodeValue.trim() ? s.previousSibling.previousSibling : s.previousSibling)?.nodeName || ""))) return;
+      const lines = [el("p", {})];
+      for (const n of [...p.childNodes]) { if (n.nodeName === "BR") lines.push(el("p", {})); else lines[lines.length - 1].append(n); }
+      p.replaceWith(...lines.filter((l) => l.textContent.trim()));
+    });
+    // A question is a bold-led paragraph or bullet; its options sit inline ("A: …") or as the bullets after it ("- **A. …**")
+    const bullets = (l) => l && /^(UL|OL)$/.test(l.nodeName) ? [...l.children].map((li) => /^\s*([A-F])[.:)]\s/.exec(li.textContent)).filter(Boolean).map((m) => m[1]) : [];
+    const qs = [...b.querySelectorAll("p, li")].map((e) => ({ e, m: /^Q(\d+)\b/.exec(bold(e)) })).filter((x) => x.m)
+      .map((x) => ({ e: x.e, q: "Q" + x.m[1], opts: [...new Set([...letters(x.e.textContent), ...bullets(x.e.nextElementSibling)])].sort() }))
+      .filter((x) => x.opts.length > 1);
     // Each Capture: line becomes its picture in place, so a question's pictures sit under that question
     const walk = document.createTreeWalker(b, NodeFilter.SHOW_TEXT), cut = [];
     while (walk.nextNode()) { const m = /^\s*Capture:\s*(\S+)\s*(?:\|\s*(.*?))?\s*$/.exec(walk.currentNode.nodeValue); if (m) cut.push([walk.currentNode, { path: m[1], cap: m[2] || "" }]); }
@@ -405,6 +415,7 @@ function card(t, kind) {
       return r;
     };
     for (const { e, q, opts } of qs) {   // under the question's last picture: before the next bold-led block
+      if (e.parentNode !== b) { (e.closest("li") || e.parentNode).append(pickRow(q, opts)); continue; }   // a bulleted question: the end of its bullet
       let at = e.nextElementSibling;
       while (at && !bold(at) && !/^(H\d|HR)$/.test(at.nodeName)) at = at.nextElementSibling;
       b.insertBefore(pickRow(q, opts), at);
