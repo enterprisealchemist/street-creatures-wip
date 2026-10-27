@@ -76,6 +76,8 @@
   .err { color: var(--bad); font-size: 13px; }
   .note { color: var(--muted); font-size: 13px; }
   .empty { color: var(--muted); font-size: 13px; }
+  h3.group { margin: 22px 0 2px; font-size: 15px; }
+  h3.group:first-of-type { margin-top: 10px; }
   /* Team: one tree, leads with their workers indented under them */
   .tree { display: flex; flex-direction: column; gap: 10px; }
   .tree .kids { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-left: 18px; padding-left: 12px; border-left: 2px solid var(--line); }
@@ -169,9 +171,15 @@
 
     <section class="panel" id="tab-review" hidden>
       <div>
-        <h2>Proposals waiting on you</h2>
-        <p class="sub">Approve or reject each one: your verdict and comment go on its GitHub issue straight away. Then send the batch once; Top Cat gets one message with all of them.</p>
+        <h2>Waiting on you</h2>
+        <p class="sub">Approve or reject each one: your verdict and comment go on its GitHub issue straight away. Decided items move to the bottom on the next refresh until Top Cat closes them.</p>
+        <h3 class="group">Decisions <span class="count" id="n-props">0</span></h3>
+        <p class="sub">New features, rules and plans, with their questions.</p>
         <div class="cards" id="review-cards"></div>
+        <h3 class="group">Art to look at <span class="count" id="n-art">0</span></h3>
+        <p class="sub">Art already merged: sign it off or say what's off. It never holds the build.</p>
+        <div class="cards" id="review-art"></div>
+        <details id="review-old"><summary>Decided, Top Cat is routing</summary><div class="cards" id="review-done"></div></details>
       </div>
       <div class="sendbar"><span class="note">Verdicts save to the tickets as you click. When you're done, tell Top Cat in chat.</span></div>
     </section>
@@ -292,6 +300,8 @@ async function load(force) {
 // ---- Review: open proposals, rendered by GitHub (sanitised HTML) ----
 async function loadReview() {
   proposals = (await pages(`/repos/${REPO}/issues?labels=board,status:proposal&state=open`, "application/vnd.github.full+json")).map(parse);
+  // sorted once per load, so a card Vito just decided stays where it is until the next refresh
+  for (const t of proposals) t.decided = t.labels.some((l) => l === "vito-approved" || l === "vito-rejected");
 }
 // ---- Release: issues with a release note ("Release:" comment, label release-note), newest first ----
 const relCache = {};
@@ -454,7 +464,13 @@ function renderCards(force) {
   if (!force && document.activeElement && document.activeElement.tagName === "TEXTAREA") { deferred = true; return; }
   deferred = false;
   const rev = $("review-cards");
-  rev.replaceChildren(...(proposals.length ? proposals.map((t) => card(t, "review")) : [el("div", { class: "empty" }, "No proposals waiting.")]));
+  const waiting = proposals.filter((t) => !t.decided), isArt = (t) => t.id.startsWith("rv-");
+  const props = waiting.filter((t) => !isArt(t)), art = waiting.filter(isArt), decided = proposals.filter((t) => t.decided);
+  rev.replaceChildren(...(props.length ? props.map((t) => card(t, "review")) : [el("div", { class: "empty" }, "No decisions waiting.")]));
+  $("review-art").replaceChildren(...(art.length ? art.map((t) => card(t, "review")) : [el("div", { class: "empty" }, "No art waiting.")]));
+  $("review-done").replaceChildren(...decided.map((t) => card(t, "review")));
+  $("review-old").hidden = !decided.length;
+  $("n-props").textContent = props.length; $("n-art").textContent = art.length;
   $("release-cards").replaceChildren(...(releases.length ? releases.map((t) => card(t, "release")) : [el("div", { class: "empty" }, "Nothing new shipped.")]));
   $("release-done").replaceChildren(...relDone.map((t) => card(t, "release")));
   $("release-old").hidden = !relDone.length;
