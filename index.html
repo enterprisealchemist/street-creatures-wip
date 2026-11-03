@@ -99,6 +99,24 @@
   .card .body { font-size: 13px; overflow-wrap: anywhere; border-top: 1px solid var(--line); padding-top: 8px; }
   .card .body img, .shots img { max-width: 100%; height: auto; image-rendering: pixelated; }
   .card .body pre { white-space: pre-wrap; }
+  /* Readable item text: real headings, spaced paragraphs, a lead label per section, the question boxed */
+  .card .body { font-size: 14px; line-height: 1.6; }
+  .card .body > * { max-width: 80ch; } .card .body > .shots, .card .body > .pick { max-width: none; }
+  .card .body p { margin: 0 0 10px; } .card .body ul, .card .body ol { margin: 0 0 10px; padding-left: 22px; } .card .body li { margin: 2px 0; }
+  .card .body h1, .card .body h2 { font-size: 16px; margin: 4px 0 10px; }
+  .card .body h3, .card .body h4 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 16px 0 4px; }
+  .card .body p.lead > strong:first-child { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-top: 14px; }
+  .card .body .qbox { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); padding: 8px 12px; border-radius: 0 6px 6px 0; }
+  .card .body .qbox > strong:first-child { display: block; margin-bottom: 2px; }
+  .card .body code { font-family: var(--mono); font-size: 12px; background: color-mix(in srgb, var(--line) 50%, transparent); padding: 0 4px; border-radius: 4px; }
+  .onebyone { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }
+  #focus { display: flex; flex-direction: column; gap: 12px; }
+  #focus .bar { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); padding: 8px 0;
+                display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #focus .bar .where { font-family: var(--mono); font-size: 13px; margin-right: auto; }
+  #focus .card { padding: 18px 22px; } #focus .card .ttl { font-size: 18px; }
+  #focus .card textarea { min-height: 90px; font-size: 14px; }
+  #focus .card .acts button { font-size: 14px; padding: 6px 16px; }
   .shots { display: flex; flex-wrap: wrap; gap: 10px; }
   .shots figure { margin: 0; max-width: 100%; } .shots figcaption { font-size: 12px; color: var(--muted); }
   .pick { display: flex; gap: 6px; align-items: center; margin: 4px 0 12px; } .pick .q { font-size: 12px; color: var(--muted); }
@@ -141,6 +159,13 @@
       <button role="tab" data-tab="release" type="button">Release<span class="count" id="n-release">0</span></button>
     </nav>
 
+    <section id="focus" hidden>
+      <div class="bar"><span class="where" id="focus-where"></span>
+        <button type="button" id="focus-prev">← Back</button><button type="button" id="focus-skip">Skip →</button><button type="button" id="focus-exit">Done</button></div>
+      <div id="focus-card"></div>
+      <p class="note">Ctrl+Enter (⌘+Enter) approves. ← and → move when you're not typing.</p>
+    </section>
+
     <section class="panel" id="tab-team" hidden>
       <div>
         <h2>Team</h2>
@@ -173,6 +198,7 @@
       <div>
         <h2>Waiting on you</h2>
         <p class="sub">Approve or reject each one: your verdict and comment go on its GitHub issue straight away. Decided items move to the bottom on the next refresh until Top Cat closes them.</p>
+        <div class="onebyone"><button class="primary" type="button" data-focus="review">Go through one at a time</button><span class="note">One item per screen: verdict, comment, then straight on to the next.</span></div>
         <h3 class="group">Decisions <span class="count" id="n-props">0</span></h3>
         <p class="sub">New features, rules and plans, with their questions.</p>
         <div class="cards" id="review-cards"></div>
@@ -188,6 +214,7 @@
       <div>
         <h2>Shipped, waiting on your look</h2>
         <p class="sub">Merged, player-visible changes with their capture. Mark each good or fix (with a comment): it goes on the ticket straight away. Then send the batch once to Garfield, who turns each fix into a ticket.</p>
+        <div class="onebyone"><button class="primary" type="button" data-focus="release">Go through one at a time</button></div>
         <div class="cards" id="release-cards"></div>
         <details id="release-old"><summary>Reviewed in the last 7 days</summary><div class="cards" id="release-done"></div></details>
       </div>
@@ -374,7 +401,7 @@ async function verdict(t, kind, word, label, drop, comment) {
   if (!r.ok) throw new Error(`label failed (${r.status})`);
   t.labels = labels; t.verdict = word;
 }
-function card(t, kind) {
+function card(t, kind, onDone) {
   const isRev = kind === "review";
   const yes = isRev ? ["approved", "vito-approved"] : ["good", "vito-good"];
   const no = isRev ? ["rejected", "vito-rejected"] : ["fix", "vito-fix"];
@@ -386,10 +413,13 @@ function card(t, kind) {
     el("span", {}, link(t), got ? el("span", { class: "pill " + got.slice(5) }, got.slice(5)) : null,
       el("span", { class: "meta" }, " · " + (t.owner || "?") + (isRev ? "" : " · " + (t.closed ? "merged " + fmtIdle(hrs(t.closed)) + " ago" : "open"))))));
   let say = () => "";   // the question picks as "picks Q1B, Q2A" (Review cards only)
+  let rejectMeans = [];   // approve-or-redo questions: a Reject records their B
   if (isRev) {
     const b = el("div", { class: "body" }); b.innerHTML = t.bodyHtml;   // GitHub's own sanitised render
-    b.querySelectorAll("pre").forEach((p) => { if (p.textContent.trim().startsWith("status:") || /^\s*(owner|status|next|priority):/m.test(p.textContent)) p.remove(); });
+    b.querySelectorAll("pre").forEach((p) => { if (p.textContent.trim().startsWith("status:") || /^\s*(owner|status|next|priority):/m.test(p.textContent)) (p.closest(".snippet-clipboard-content") || p).remove(); });
     b.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener"; });
+    // the attribution footer is noise here
+    b.querySelectorAll("p").forEach((p) => { if (/^Generated by Claude Code$/.test(p.textContent.trim())) { const h = p.previousElementSibling; if (h && h.nodeName === "HR") h.remove(); p.remove(); } });
     // A question ("**Q1, …** A: … B: …") gets a button per option under its pictures; the picks go in the verdict comment
     const picks = drafts["p" + t.num] || (drafts["p" + t.num] = {});
     const letters = (txt) => [...new Set([...txt.matchAll(/(?:^|[\s(.;])([A-F]):\s/g)].map((m) => m[1]))].sort();
@@ -403,9 +433,34 @@ function card(t, kind) {
     });
     // A question is a bold-led paragraph or bullet; its options sit inline ("A: …") or as the bullets after it ("- **A. …**")
     const bullets = (l) => l && /^(UL|OL)$/.test(l.nodeName) ? [...l.children].map((li) => /^\s*([A-F])[.:)]\s/.exec(li.textContent)).filter(Boolean).map((m) => m[1]) : [];
-    const qs = [...b.querySelectorAll("p, li")].map((e) => ({ e, m: /^Q(\d+)\b/.exec(bold(e)) })).filter((x) => x.m)
+    const allQs = [...b.querySelectorAll("p, li")].map((e) => ({ e, m: /^Q(\d+)\b/.exec(bold(e)) })).filter((x) => x.m)
       .map((x) => ({ e: x.e, q: "Q" + x.m[1], opts: [...new Set([...letters(x.e.textContent), ...bullets(x.e.nextElementSibling)])].sort() }))
       .filter((x) => x.opts.length > 1);
+    // "A: approve. B: redo …" is just Approve or Reject: no buttons; Reject means B
+    const optA = (e) => { const m = /(?:^|[\s(.;])A:\s*([\s\S]*?)(?=\s[B-F]:\s|$)/.exec(e.textContent); return m ? m[1].trim() : ""; };
+    const plain = (x) => x.opts.length === 2 && /^\W*(approve|approved|ship it|sign (it )?off|keep (it|as is|this)|good|yes|accept)\b/i.test(optA(x.e));
+    const qs = allQs.filter((x) => !plain(x));
+    rejectMeans = allQs.filter(plain).map((x) => x.q + x.opts[1]);
+    for (const x of allQs) {
+      x.e.classList.add("qbox");
+      // each option on its own line: a line break before "B: ", "C: " … and the letter in bold
+      const tw = document.createTreeWalker(x.e, NodeFilter.SHOW_TEXT), texts = [];
+      while (tw.nextNode()) texts.push(tw.currentNode);
+      for (const n of texts) {
+        const parts = n.nodeValue.split(/(?:^|(?<=[\s(.;]))([A-F]):\s/);
+        if (parts.length < 3) continue;
+        const frag = [document.createTextNode(parts[0])];
+        for (let k = 1; k < parts.length; k += 2) frag.push(...(parts[k] === "A" ? [] : [el("br")]), el("strong", {}, parts[k] + ": "), document.createTextNode(parts[k + 1]));
+        n.replaceWith(...frag);
+      }
+    }
+    // the issue's own first heading repeats the card title
+    let h0 = b.firstElementChild;
+    if (h0 && h0.classList.contains("markdown-heading")) h0 = h0.querySelector("h1, h2, h3") ? h0 : null;
+    if (h0 && (/^H[1-3]$/.test(h0.nodeName) || h0.classList.contains("markdown-heading")) && h0.textContent.trim().startsWith(t.title.trim().slice(0, 30))) h0.remove();
+    for (const x of allQs.filter(plain)) x.e.append(el("span", { class: "note", style: "display:block" }, `Approve = ${x.q} A. Reject = ${x.q} ${x.opts[1]} (your comment can change it).`));
+    // a paragraph that opens with a bold "Label:" is a section: the label shows as a small heading
+    b.querySelectorAll(":scope > p").forEach((p) => { const k = bold(p); if (k && /:$/.test(k) && !/^Q\d+/.test(k) && !p.classList.contains("qbox")) p.classList.add("lead"); });
     // Each Capture: line becomes its picture in place, so a question's pictures sit under that question
     const walk = document.createTreeWalker(b, NodeFilter.SHOW_TEXT), cut = [];
     while (walk.nextNode()) { const m = /^\s*Capture:\s*(\S+)\s*(?:\|\s*(.*?))?\s*$/.exec(walk.currentNode.nodeValue); if (m) cut.push([walk.currentNode, { path: m[1], cap: m[2] || "" }]); }
@@ -437,7 +492,7 @@ function card(t, kind) {
       b.insertBefore(pickRow(q, opts), at);
     }
     c.append(b);
-    if (!qs.length && letters(b.textContent).length > 1 && cut.length) c.append(pickRow("Pick", letters(b.textContent)));
+    if (!allQs.length && letters(b.textContent).length > 1 && cut.length) c.append(pickRow("Pick", letters(b.textContent)));
   } else {
     if (t.note.where) c.append(el("div", { class: "note" }, "Where: " + t.note.where));
     if (t.note.summary.length) c.append(el("div", {}, t.note.summary.join(" ")));
@@ -455,11 +510,15 @@ function card(t, kind) {
   const go = async (v) => {
     if (v === no && !isRev && !ta.value.trim()) { msg.textContent = "Say what to fix first."; ta.focus(); return; }
     ok.disabled = bad.disabled = true; msg.textContent = "Writing to the ticket…";
-    const note = [say(), ta.value.trim()].filter(Boolean).join(" — ");
-    try { await verdict(t, kind, v[0], v[1], both, note); ta.value = ""; delete drafts[t.num]; delete drafts["p" + t.num]; renderCards(true); }
+    const auto = v === no && rejectMeans.length ? "picks " + rejectMeans.join(", ") : "";
+    const note = [say() || auto, ta.value.trim()].filter(Boolean).join(" — ");
+    try { await verdict(t, kind, v[0], v[1], both, note); ta.value = ""; delete drafts[t.num]; delete drafts["p" + t.num]; if (onDone) onDone(); else renderCards(true); }
     catch (e) { msg.textContent = "Not saved: " + e.message + ". Your comment is still here."; ok.disabled = bad.disabled = false; }
   };
   ok.addEventListener("click", () => go(yes)); bad.addEventListener("click", () => go(no));
+  if (rejectMeans.length) bad.textContent = "Reject (" + rejectMeans.join(", ") + ")";
+  ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!ok.disabled) go(yes); } });
+  c.go = () => { if (!ok.disabled) go(yes); };
   c.append(ta, el("div", { class: "acts" }, ok, bad, msg));
   return c;
 }
@@ -587,6 +646,48 @@ async function setPriority(t, v) {
     const row = $("p-" + t.id); if (row) row.closest("tr").classList.add("fresh");
   } catch (e) { err.textContent = "Priority not changed: " + e.message; err.hidden = false; }
 }
+
+// ---- one at a time: a snapshot queue of what's waiting; a verdict saves and moves on ----
+let focus = null;   // { kind, list, i }
+function focusList(kind) {
+  if (kind === "release") return releases.filter((t) => !t.labels.some((l) => l === "vito-good" || l === "vito-fix"));
+  const w = proposals.filter((t) => !t.decided && !t.labels.some((l) => l === "vito-approved" || l === "vito-rejected"));
+  const isArt = (t) => t.id.startsWith("rv-");
+  return w.filter((t) => !isArt(t)).concat(w.filter(isArt));
+}
+function openFocus(kind) {
+  focus = { kind, list: focusList(kind), i: 0 };
+  for (const p of ["team", "board", "review", "release"]) $("tab-" + p).hidden = true;
+  document.querySelector("nav.tabs").hidden = true; $("focus").hidden = false;
+  showFocus();
+}
+function closeFocus() {
+  const kind = focus ? focus.kind : "review"; focus = null;
+  $("focus").hidden = true; document.querySelector("nav.tabs").hidden = false; tab(kind); renderCards(true);
+}
+function showFocus() {
+  const { kind, list, i } = focus, box = $("focus-card");
+  $("focus-prev").disabled = i === 0; $("focus-skip").disabled = i >= list.length;
+  if (i >= list.length) {
+    $("focus-where").textContent = `${list.length} of ${list.length}`;
+    box.replaceChildren(el("div", { class: "card" }, el("div", { class: "ttl" }, "That's everything."),
+      el("p", { class: "note" }, `Your verdicts are on the tickets. Tell ${kind === "release" ? "Garfield" : "Top Cat"} in chat that you're done.`)));
+  } else {
+    const t = list[i], art = kind === "review" && t.id.startsWith("rv-");
+    $("focus-where").textContent = `${i + 1} of ${list.length}` + (kind === "review" ? (art ? " · art" : " · decision") : " · release");
+    box.replaceChildren(card(t, kind, () => { focus.i += 1; showFocus(); }));
+    const ta = box.querySelector("textarea"); if (ta) ta.focus({ preventScroll: true });
+  }
+  window.scrollTo({ top: 0 });
+}
+document.querySelectorAll("[data-focus]").forEach((b) => b.addEventListener("click", () => openFocus(b.dataset.focus)));
+$("focus-prev").addEventListener("click", () => { if (focus.i > 0) { focus.i -= 1; showFocus(); } });
+$("focus-skip").addEventListener("click", () => { if (focus.i < focus.list.length) { focus.i += 1; showFocus(); } });
+$("focus-exit").addEventListener("click", closeFocus);
+document.addEventListener("keydown", (e) => {
+  if (!focus || /^(TEXTAREA|INPUT)$/.test(document.activeElement?.tagName || "")) return;
+  if (e.key === "ArrowRight") $("focus-skip").click(); else if (e.key === "ArrowLeft") $("focus-prev").click();
+});
 
 // ---- tabs, lock, unlock ----
 function tab(name) {
