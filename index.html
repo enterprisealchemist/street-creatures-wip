@@ -258,7 +258,7 @@ function parse(issue) {
 }
 
 async function gh(path, opts = {}) {
-  const r = await fetch(API + path, { ...opts, headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + token,
+  const r = await fetch(API + path, { cache: "no-cache", ...opts, headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + token,
     "X-GitHub-Api-Version": "2022-11-28", ...(opts.headers || {}) } });
   if (r.status === 401) throw Object.assign(new Error("GitHub refused the token (401). Set up again with a new token."), { auth: true });
   if (r.status === 403 || r.status === 404) throw new Error(`GitHub said ${r.status} for ${path.split("?")[0]}: check the token's repo access and permissions.`);
@@ -279,18 +279,17 @@ async function pages(path, accept) {
 async function load(force) {
   if (busy) return; busy = true;
   try {
-    let changed = true;
-    const r = await gh(`/repos/${REPO}/issues?labels=board&state=open&per_page=100&page=1`, !force && etag ? { headers: { "If-None-Match": etag } } : {});
-    if (r.status === 304) changed = false;                  // unchanged: no rate cost, just re-age the idle times
-    else if (!r.ok) throw new Error(`GitHub said ${r.status}.`);
-    if (changed) {
-      etag = r.headers.get("ETag");
-      const first = (await r.json()).filter((x) => !x.pull_request);
-      const rest = first.length === 100 ? await pages(`/repos/${REPO}/issues?labels=board&state=open`).then((a) => a.slice(100)) : [];
-      tickets = first.concat(rest).map(parse);
-      await loadReview(); await loadRelease();
-    }
-    render();
+    // Any comment, label, edit or close on any issue moves the newest "updated" issue, so this one cheap call
+    // (a 304 when nothing moved) tells whether anything on the page can have changed.
+    const r = await gh(`/repos/${REPO}/issues?state=all&sort=updated&direction=desc&per_page=1`, !force && etag ? { headers: { "If-None-Match": etag } } : {});
+    if (r.status === 304) { render(); return; }            // unchanged: just re-age the idle times
+    if (!r.ok) throw new Error(`GitHub said ${r.status}.`);
+    const tag = r.headers.get("ETag");
+    tickets = (await pages(`/repos/${REPO}/issues?labels=board&state=open`)).map(parse);
+    render();                                               // Team and Board show now; Review and Release follow
+    await loadReview(); render();
+    await loadRelease(); render();
+    etag = tag;                                             // only after a full load, so a failed load is retried
   } catch (e) {
     if (e.auth) { store.del(TOK); lock(); $("setup-err").textContent = e.message; $("setup-err").hidden = false; }
     else $("stamp").textContent = "Load failed: " + e.message;
@@ -304,19 +303,26 @@ async function loadReview() {
   for (const t of proposals) t.decided = t.labels.some((l) => l === "vito-approved" || l === "vito-rejected");
 }
 // ---- Release: issues with a release note ("Release:" comment, label release-note), newest first ----
-const relCache = {};
+const REL = "sc-wip-rel";
+const relCache = (() => { try { return JSON.parse(store.get(REL) || "{}"); } catch (e) { return {}; } })();
 async function loadRelease() {
   const since = new Date(Date.now() - 14 * 864e5).toISOString();
-  const rows = (await pages(`/repos/${REPO}/issues?labels=release-note&state=all&since=${since}&sort=updated`)).map(parse);
-  for (const t of rows) {
-    const key = t.num + "@" + t.idle.toFixed(3);
-    if (!relCache[t.num] || relCache[t.num].key !== key) {
-      const cs = await (await gh(`/repos/${REPO}/issues/${t.num}/comments?per_page=100`)).json();
-      const note = cs.filter((c) => /^Release:/.test(c.body || "")).pop();
-      relCache[t.num] = { key, note: note ? parseNote(note.body) : null };
-    }
-    t.note = relCache[t.num].note;
-  }
+  const raw = await pages(`/repos/${REPO}/issues?labels=release-note&state=all&since=${since}&sort=updated`);
+  const rows = raw.map(parse), keys = {};
+  for (const x of raw) keys[x.number] = x.updated_at;
+  const todo = rows.filter((t) => !relCache[t.num] || relCache[t.num].key !== keys[t.num]);
+  let left = todo.length;
+  const one = async (t) => {
+    const cs = await (await gh(`/repos/${REPO}/issues/${t.num}/comments?per_page=100`)).json();
+    const note = cs.filter((c) => /^Release:/.test(c.body || "")).pop();
+    relCache[t.num] = { key: keys[t.num], note: note ? parseNote(note.body) : null };
+    left -= 1; if (left % 20 === 0 && left) $("stamp").textContent = `Loading release notes… ${left} to go`;
+  };
+  const queue = todo.slice();
+  await Promise.all(Array.from({ length: Math.min(8, queue.length) }, async () => { while (queue.length) await one(queue.shift()); }));
+  for (const n of Object.keys(relCache)) if (!(n in keys)) delete relCache[n];     // keep only the 14-day window
+  store.set(REL, JSON.stringify(relCache));
+  for (const t of rows) t.note = relCache[t.num].note;
   const seen = (t) => t.labels.includes("vito-good") || t.labels.includes("vito-fix");
   releases = rows.filter((t) => t.note && !seen(t));
   relDone = rows.filter((t) => t.note && seen(t) && t.idle < 7 * 24);
