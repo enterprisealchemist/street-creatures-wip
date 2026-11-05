@@ -27,3 +27,5 @@ and write (Send).
 
 None. The `send` Action comments with the repo's own `github.token`; its input is just `#<issue> <verdict>` lines (this
 repo is public, so comment text never goes through it).
+
+Open it at https://enterprisealchemist.github.io/street-creatures-wip/ (Pages: deploy from branch `main`, root).
