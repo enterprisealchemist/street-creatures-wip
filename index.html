@@ -125,6 +125,10 @@
   .sendbar { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); padding: 10px 0; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
   details > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   @media (prefers-reduced-motion: no-preference) { .fresh { animation: flash .8s ease-out; } @keyframes flash { from { background: color-mix(in srgb, var(--accent) 18%, transparent); } } }
+.mdcap { overflow-x: auto; max-width: 100%; font-size: 13px; }
+.mdcap table { border-collapse: collapse; margin: 8px 0; }
+.mdcap th, .mdcap td { border: 1px solid var(--line, #444); padding: 3px 8px; text-align: left; white-space: nowrap; }
+.mdcap pre { white-space: pre-wrap; }
 </style>
 </head>
 <body>
@@ -374,6 +378,19 @@ function shot(s, into) {
 }
 async function fill(fig, s) {
   try {
+    if (/\.(md|txt)$/i.test(s.path)) {   // a text capture (a table, a log): GitHub renders it, shown in place (Vito 11-05)
+      if (!imgCache[s.path]) {
+        const r = await gh(`/repos/${REPO}/contents/${s.path.split("/").map(encodeURIComponent).join("/")}?ref=master`, { headers: { Accept: "application/vnd.github.raw+json" } });
+        if (!r.ok) throw new Error(r.status);
+        const text = await r.text();
+        const m = /\.md$/i.test(s.path) ? await gh("/markdown", { method: "POST", body: JSON.stringify({ text, mode: "gfm" }) }).catch(() => null) : null;
+        imgCache[s.path] = m && m.ok ? await m.text() : null;
+        if (imgCache[s.path] === null) imgCache[s.path] = "<pre>" + text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]) + "</pre>";
+      }
+      const box = el("div", { class: "mdcap" }); box.innerHTML = imgCache[s.path];   // GitHub's /markdown output is sanitized
+      fig.replaceChildren(box, ...(s.cap ? [el("figcaption", {}, s.cap)] : []));
+      return;
+    }
     if (!imgCache[s.path]) {
       const r = await gh(`/repos/${REPO}/contents/${s.path.split("/").map(encodeURIComponent).join("/")}?ref=master`, { headers: { Accept: "application/vnd.github.raw+json" } });
       if (!r.ok) throw new Error(r.status);
