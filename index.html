@@ -390,19 +390,23 @@ async function fill(fig, s) {
   } catch (e) { fig.replaceChildren(el("div", { class: "err" }, `Capture ${s.path} did not load (${e.message}).`)); }
 }
 
-// ---- Send to Top Cat: dispatches the send Action in this repo, which fires Top Cat's verdict runner (Vito 11-05).
-// Only issue numbers and verdict words leave the page (this repo is public); the runner reads the comments itself.
-const WIP = "enterprisealchemist/street-creatures-wip";
+// ---- Send to Top Cat: dispatches the send Action in this repo, which comments on the inbox PR the Verdict runner
+// session watches (Vito 11-05). Only issue numbers and verdict words leave the page (this repo is public); the runner
+// reads the comments itself. Only verdicts clicked since the last Send go (kept in this browser until sent).
+const WIP = "enterprisealchemist/street-creatures-wip", PENDING = "wip-send-pending";
+const pending = () => { try { return JSON.parse(localStorage.getItem(PENDING) || "{}"); } catch { return {}; } };
+const setPending = (o) => { try { localStorage.setItem(PENDING, JSON.stringify(o)); } catch {} };
 async function sendToTopCat() {
-  const word = (t) => ["vito-approved", "vito-rejected", "vito-good", "vito-fix"].find((l) => t.labels.includes(l));
-  const lines = proposals.concat(relDone).filter(word).map((t) => `#${t.num} ${word(t).slice(5)}`);
+  const sent = pending();
+  const lines = Object.entries(sent).map(([n, w]) => `#${n} ${w}`);
   const msgs = document.querySelectorAll(".send-msg"), say = (m) => msgs.forEach((x) => (x.textContent = m));
-  if (!lines.length) { say("Nothing decided to send yet."); return; }
+  if (!lines.length) { say("Nothing new to send: every verdict you clicked here has gone to Top Cat."); return; }
   document.querySelectorAll("button.send").forEach((b) => (b.disabled = true));
   try {
     const r = await gh(`/repos/${WIP}/actions/workflows/send.yml/dispatches`, { method: "POST",
       body: JSON.stringify({ ref: "main", inputs: { issues: lines.join("\n") } }) });
     if (r.status !== 204) throw new Error(`GitHub said ${r.status}`);
+    const left = pending(); for (const n of Object.keys(sent)) delete left[n]; setPending(left);
     say(`Sent ${lines.length} verdict${lines.length > 1 ? "s" : ""} to Top Cat (${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}). Routing takes a few minutes.`);
   } catch (e) { say("Send failed: " + e.message + ". Your verdicts are still saved on the tickets."); }
   finally { setTimeout(() => document.querySelectorAll("button.send").forEach((b) => (b.disabled = false)), 30000); }
@@ -419,6 +423,7 @@ async function verdict(t, kind, word, label, drop, comment) {
   r = await gh(`/repos/${REPO}/issues/${t.num}`, { method: "PATCH", body: JSON.stringify({ labels }) });
   if (!r.ok) throw new Error(`label failed (${r.status})`);
   t.labels = labels; t.verdict = word;
+  const p = pending(); p[t.num] = label.slice(5); setPending(p);
 }
 function card(t, kind, onDone) {
   const isRev = kind === "review";
