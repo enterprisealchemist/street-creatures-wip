@@ -1,5 +1,5 @@
 # "Send to Top Cat" on the WIP page dispatches this (Vito 11-05). It comments the verdict lines on the inbox PR
-# (#12, never merged); Top Cat's Verdict runner session watches that PR, so the comment wakes it to route them.
+# (#12, never merged); Top Cat's session watches that PR, so the comment wakes it to route them.
 # This repo is public: inputs carry only "#<issue> <verdict>" lines, never comment text. No secrets: github.token.
 name: send
 on:

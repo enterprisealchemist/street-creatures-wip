@@ -407,8 +407,8 @@ async function fill(fig, s) {
   } catch (e) { fig.replaceChildren(el("div", { class: "err" }, `Capture ${s.path} did not load (${e.message}).`)); }
 }
 
-// ---- Send to Top Cat: dispatches the send Action in this repo, which comments on the inbox PR the Verdict runner
-// session watches (Vito 11-05). Only issue numbers and verdict words leave the page (this repo is public); the runner
+// ---- Send to Top Cat: dispatches the send Action in this repo, which comments on the inbox PR Top Cat's
+// session watches (Vito 11-05). Only issue numbers and verdict words leave the page (this repo is public); Top Cat
 // reads the comments itself. Only verdicts clicked since the last Send go (kept in this browser until sent).
 const WIP = "enterprisealchemist/street-creatures-wip", PENDING = "wip-send-pending";
 const pending = () => { try { return JSON.parse(localStorage.getItem(PENDING) || "{}"); } catch { return {}; } };
