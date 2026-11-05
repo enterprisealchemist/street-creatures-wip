@@ -1,0 +1,32 @@
+# "Send to Top Cat" on the WIP page dispatches this (Vito 11-05). It fires Top Cat's verdict-runner scheduled task,
+# which starts a fresh session that runs verdict_action.py and routes Top Cat's own items.
+# This repo is public: inputs carry only "#<issue> <verdict>" lines, never comment text.
+# Secrets (Settings > Secrets and variables > Actions): TOPCAT_ROUTINE_URL (the task's /fire URL), TOPCAT_ROUTINE_TOKEN.
+name: send
+on:
+  workflow_dispatch:
+    inputs:
+      issues:
+        description: verdict lines, "#<issue> <approved|rejected|good|fix>"
+        required: true
+permissions: {}
+concurrency: { group: send, cancel-in-progress: false }
+jobs:
+  fire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Fire Top Cat's verdict runner
+        env:
+          ISSUES: ${{ inputs.issues }}
+          URL: ${{ secrets.TOPCAT_ROUTINE_URL }}
+          TOK: ${{ secrets.TOPCAT_ROUTINE_TOKEN }}
+        run: |
+          if printf '%s\n' "$ISSUES" | grep -Eqv '^#[0-9]+ (approved|rejected|good|fix)$'; then echo "bad input line"; exit 1; fi
+          [ -n "$TOK" ] && [ -n "$URL" ] || { echo "TOPCAT_ROUTINE_URL or TOPCAT_ROUTINE_TOKEN is not set"; exit 1; }
+          case "$URL" in https://api.anthropic.com/*/fire) ;; *) echo "TOPCAT_ROUTINE_URL is not a /fire URL"; exit 1;; esac
+          body=$(jq -n --arg t "$ISSUES" '{text:$t}')
+          code=$(curl -sS -o resp.txt -w '%{http_code}' -X POST "$URL" \
+            -H "Authorization: Bearer $TOK" -H 'anthropic-beta: experimental-cc-routine-2026-04-01' \
+            -H 'anthropic-version: 2023-06-01' -H 'Content-Type: application/json' -d "$body")
+          echo "HTTP $code"; [ "$code" = 200 ] || { head -c 400 resp.txt; exit 1; }

@@ -207,18 +207,18 @@
         <div class="cards" id="review-art"></div>
         <details id="review-old"><summary>Decided, Top Cat is routing</summary><div class="cards" id="review-done"></div></details>
       </div>
-      <div class="sendbar"><span class="note">Verdicts save to the tickets as you click. When you're done, tell Top Cat in chat.</span></div>
+      <div class="sendbar"><button class="primary send" type="button">Send to Top Cat</button><span class="note send-msg">Verdicts save to the tickets as you click. When you're done, press Send: Top Cat routes them within a few minutes.</span></div>
     </section>
 
     <section class="panel" id="tab-release" hidden>
       <div>
         <h2>Shipped, waiting on your look</h2>
-        <p class="sub">Merged, player-visible changes with their capture. Mark each good or fix (with a comment): it goes on the ticket straight away. Then send the batch once to Garfield, who turns each fix into a ticket.</p>
+        <p class="sub">Merged, player-visible changes with their capture. Mark each good or fix (with a comment): it goes on the ticket straight away. Then press Send once: Top Cat turns each fix into a ticket.</p>
         <div class="onebyone"><button class="primary" type="button" data-focus="release">Go through one at a time</button></div>
         <div class="cards" id="release-cards"></div>
         <details id="release-old"><summary>Reviewed in the last 7 days</summary><div class="cards" id="release-done"></div></details>
       </div>
-      <div class="sendbar"><span class="note">Verdicts save to the tickets as you click. When you're done, tell Garfield in chat.</span></div>
+      <div class="sendbar"><button class="primary send" type="button">Send to Top Cat</button><span class="note send-msg">Verdicts save to the tickets as you click. When you're done, press Send: Top Cat routes them within a few minutes.</span></div>
     </section>
   </div>
 </div>
@@ -390,7 +390,26 @@ async function fill(fig, s) {
   } catch (e) { fig.replaceChildren(el("div", { class: "err" }, `Capture ${s.path} did not load (${e.message}).`)); }
 }
 
-// ---- verdicts: comment + label on the issue; Vito tells Top Cat or Garfield in chat when he's done ----
+// ---- Send to Top Cat: dispatches the send Action in this repo, which fires Top Cat's verdict runner (Vito 11-05).
+// Only issue numbers and verdict words leave the page (this repo is public); the runner reads the comments itself.
+const WIP = "enterprisealchemist/street-creatures-wip";
+async function sendToTopCat() {
+  const word = (t) => ["vito-approved", "vito-rejected", "vito-good", "vito-fix"].find((l) => t.labels.includes(l));
+  const lines = proposals.concat(relDone).filter(word).map((t) => `#${t.num} ${word(t).slice(5)}`);
+  const msgs = document.querySelectorAll(".send-msg"), say = (m) => msgs.forEach((x) => (x.textContent = m));
+  if (!lines.length) { say("Nothing decided to send yet."); return; }
+  document.querySelectorAll("button.send").forEach((b) => (b.disabled = true));
+  try {
+    const r = await gh(`/repos/${WIP}/actions/workflows/send.yml/dispatches`, { method: "POST",
+      body: JSON.stringify({ ref: "main", inputs: { issues: lines.join("\n") } }) });
+    if (r.status !== 204) throw new Error(`GitHub said ${r.status}`);
+    say(`Sent ${lines.length} verdict${lines.length > 1 ? "s" : ""} to Top Cat (${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}). Routing takes a few minutes.`);
+  } catch (e) { say("Send failed: " + e.message + ". Your verdicts are still saved on the tickets."); }
+  finally { setTimeout(() => document.querySelectorAll("button.send").forEach((b) => (b.disabled = false)), 30000); }
+}
+document.querySelectorAll("button.send").forEach((b) => b.addEventListener("click", sendToTopCat));
+
+// ---- verdicts: comment + label on the issue ----
 async function verdict(t, kind, word, label, drop, comment) {
   const body = `Vito: ${word}${comment ? " — " + comment : ""} (WIP page)`;
   let r = await gh(`/repos/${REPO}/issues/${t.num}/comments`, { method: "POST", body: JSON.stringify({ body }) });
@@ -671,7 +690,7 @@ function showFocus() {
   if (i >= list.length) {
     $("focus-where").textContent = `${list.length} of ${list.length}`;
     box.replaceChildren(el("div", { class: "card" }, el("div", { class: "ttl" }, "That's everything."),
-      el("p", { class: "note" }, `Your verdicts are on the tickets. Tell ${kind === "release" ? "Garfield" : "Top Cat"} in chat that you're done.`)));
+      el("p", { class: "note" }, "Your verdicts are on the tickets. Press Send to Top Cat at the bottom of the tab.")));
   } else {
     const t = list[i], art = kind === "review" && t.id.startsWith("rv-");
     $("focus-where").textContent = `${i + 1} of ${list.length}` + (kind === "review" ? (art ? " · art" : " · decision") : " · release");
