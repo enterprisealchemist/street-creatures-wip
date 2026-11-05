@@ -9,9 +9,10 @@ Vito's private studio page over the board (the `board` issues in the private str
 - **Release**: merged, player-visible changes (issues labelled `release-note`, with a `Release:` comment and its
   capture). Good or fix with a comment, the same way (`vito-good` / `vito-fix`).
 
-Review and Release each have a **Send to Top Cat** button: it starts the `send` Action in this repo, which fires
-Top Cat's verdict-runner scheduled task (a fresh session that runs verdict_action.py and routes the verdicts). It sends
-only issue numbers and verdict words; the runner reads your comments on the private issues.
+Review and Release each have a **Send to Top Cat** button: it starts the `send` Action in this repo, which comments
+the decided issue numbers on the inbox PR (#12, never merged). Top Cat's Verdict runner session watches that PR, so the
+comment wakes it to run verdict_action.py and route them. It sends only issue numbers and verdict words; the runner reads
+your comments on the private issues.
 
 ## Token
 
@@ -24,9 +25,5 @@ and write (Send).
 
 ## Secrets
 
-`TOPCAT_ROUTINE_URL` and `TOPCAT_ROUTINE_TOKEN` (Settings → Secrets and variables → Actions) are the /fire URL and API
-token of the "Send to Top Cat (WIP page)" scheduled task (claude.ai → Code → scheduled tasks → that task → API).
-Only the Action reads them. Its input is just `#<issue> <verdict>` lines (this repo is public, so comment text never
-goes through it).
-
-Open it at https://enterprisealchemist.github.io/street-creatures-wip/ (Pages: deploy from branch `main`, root).
+None. The `send` Action comments with the repo's own `github.token`; its input is just `#<issue> <verdict>` lines (this
+repo is public, so comment text never goes through it).

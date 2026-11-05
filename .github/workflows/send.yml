@@ -1,7 +1,6 @@
-# "Send to Top Cat" on the WIP page dispatches this (Vito 11-05). It fires Top Cat's verdict-runner scheduled task,
-# which starts a fresh session that runs verdict_action.py and routes Top Cat's own items.
-# This repo is public: inputs carry only "#<issue> <verdict>" lines, never comment text.
-# Secrets (Settings > Secrets and variables > Actions): TOPCAT_ROUTINE_URL (the task's /fire URL), TOPCAT_ROUTINE_TOKEN.
+# "Send to Top Cat" on the WIP page dispatches this (Vito 11-05). It comments the verdict lines on the inbox PR
+# (#12, never merged); Top Cat's Verdict runner session watches that PR, so the comment wakes it to route them.
+# This repo is public: inputs carry only "#<issue> <verdict>" lines, never comment text. No secrets: github.token.
 name: send
 on:
   workflow_dispatch:
@@ -9,24 +8,18 @@ on:
       issues:
         description: verdict lines, "#<issue> <approved|rejected|good|fix>"
         required: true
-permissions: {}
+permissions: { pull-requests: write }
 concurrency: { group: send, cancel-in-progress: false }
 jobs:
-  fire:
+  send:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Fire Top Cat's verdict runner
+      - name: Comment on the inbox PR
         env:
           ISSUES: ${{ inputs.issues }}
-          URL: ${{ secrets.TOPCAT_ROUTINE_URL }}
-          TOK: ${{ secrets.TOPCAT_ROUTINE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if printf '%s\n' "$ISSUES" | grep -Eqv '^#[0-9]+ (approved|rejected|good|fix)$'; then echo "bad input line"; exit 1; fi
-          [ -n "$TOK" ] && [ -n "$URL" ] || { echo "TOPCAT_ROUTINE_URL or TOPCAT_ROUTINE_TOKEN is not set"; exit 1; }
-          case "$URL" in https://api.anthropic.com/*/fire) ;; *) echo "TOPCAT_ROUTINE_URL is not a /fire URL"; exit 1;; esac
-          body=$(jq -n --arg t "$ISSUES" '{text:$t}')
-          code=$(curl -sS -o resp.txt -w '%{http_code}' -X POST "$URL" \
-            -H "Authorization: Bearer $TOK" -H 'anthropic-beta: experimental-cc-routine-2026-04-01' \
-            -H 'anthropic-version: 2023-06-01' -H 'Content-Type: application/json' -d "$body")
-          echo "HTTP $code"; [ "$code" = 200 ] || { head -c 400 resp.txt; exit 1; }
+          body=$(printf 'Send from the WIP page: route these verdicts (read the newest "Vito: ... (WIP page)" comment on each private issue).\n\n%s\n' "$ISSUES" | sed 's/^#/street-creatures#/')
+          gh pr comment 12 -R "$GITHUB_REPOSITORY" --body "$body"
