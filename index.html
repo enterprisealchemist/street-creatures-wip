@@ -454,6 +454,7 @@ function card(t, kind, onDone) {
     el("span", {}, link(t), got ? el("span", { class: "pill " + got.slice(5) }, got.slice(5)) : null,
       el("span", { class: "meta" }, " · " + (t.owner || "?") + (isRev ? "" : " · " + (t.closed ? "merged " + fmtIdle(hrs(t.closed)) + " ago" : "open"))))));
   let say = () => "";   // the question picks as "picks Q1B, Q2A" (Review cards only)
+  let clipSay = () => "", clipRejected = () => false, clipSync = () => {};   // clip toggles (animation batch items)
   let rejectMeans = [];   // approve-or-redo questions: a Reject records their B
   if (isRev) {
     const b = el("div", { class: "body" }); b.innerHTML = t.bodyHtml;   // GitHub's own sanitised render
@@ -503,14 +504,38 @@ function card(t, kind, onDone) {
     // a paragraph that opens with a bold "Label:" is a section: the label shows as a small heading
     b.querySelectorAll(":scope > p").forEach((p) => { const k = bold(p); if (k && /:$/.test(k) && !/^Q\d+/.test(k) && !p.classList.contains("qbox")) p.classList.add("lead"); });
     // Each Capture: line becomes its picture in place, so a question's pictures sit under that question
+    // An animation batch item (no Q) has "Clip: <name>" / "Piece: <name>" lines, each with a Capture under it: one Approve/Reject per clip
     const walk = document.createTreeWalker(b, NodeFilter.SHOW_TEXT), cut = [];
-    while (walk.nextNode()) { const m = /^\s*Capture:\s*(\S+)\s*(?:\|\s*(.*?))?\s*$/.exec(walk.currentNode.nodeValue); if (m) cut.push([walk.currentNode, { path: m[1], cap: m[2] || "" }]); }
-    for (const [n, s] of cut) {
+    let clipNow = "";
+    while (walk.nextNode()) {
+      const cm = /^\s*(?:Clip|Piece):\s*(\S.*?)\s*$/.exec(walk.currentNode.nodeValue); if (cm) clipNow = cm[1].replace(/[`*_]/g, "").replace(/[,=]/g, "-").trim();
+      const m = /^\s*Capture:\s*(\S+)\s*(?:\|\s*(.*?))?\s*$/.exec(walk.currentNode.nodeValue); if (m) cut.push([walk.currentNode, { path: m[1], cap: m[2] || "" }, clipNow]);
+    }
+    const clipRows = new Map();   // clip name -> the picture row of its last capture
+    for (const [n, s, clip] of cut) {
       let prev = n.previousSibling;
       while (prev && (prev.nodeName === "BR" || (prev.nodeType === 3 && !prev.nodeValue.trim()))) { const pp = prev.previousSibling; prev.remove(); prev = pp; }
       let row = prev && prev.classList && prev.classList.contains("shots") ? prev : null;
       if (!row) { row = el("div", { class: "shots" }); n.parentNode.insertBefore(row, n); }
       shot(s, row); n.remove();
+      if (clip && !allQs.length) clipRows.set(clip, row);
+    }
+    const clips = drafts["c" + t.num] || (drafts["c" + t.num] = {});   // clip -> "approved" | "rejected"
+    clipSay = () => { const k = [...clipRows.keys()].filter((n) => clips[n]).map((n) => n + "=" + clips[n]).join(", "); return k ? "clips: " + k : ""; };
+    clipRejected = () => [...clipRows.keys()].some((n) => clips[n] === "rejected");
+    clipSync = () => { const rj = clipRejected(); ok.textContent = rj ? "Send as rejected" : "Approve"; msg.textContent = clipSay() ? "Sends " + (rj ? "rejected" : "approved") + " with " + clipSay() + "." : ""; };
+    for (const [name, row] of clipRows) {
+      const r = el("div", { class: "pick" }, el("span", { class: "q" }, name + ":"));
+      for (const l of ["approved", "rejected"]) {
+        const btn = el("button", { type: "button", class: clips[name] === l ? "on" : null, "aria-pressed": String(clips[name] === l) }, l === "approved" ? "Approve" : "Reject");
+        btn.addEventListener("click", () => {
+          if (clips[name] === l) delete clips[name]; else clips[name] = l;
+          r.querySelectorAll("button").forEach((x) => { const on = clips[name] === (x.textContent === "Approve" ? "approved" : "rejected"); x.classList.toggle("on", on); x.setAttribute("aria-pressed", String(on)); });
+          clipSync();
+        });
+        r.append(btn);
+      }
+      row.after(r);
     }
     say = () => { const k = Object.entries(picks).map(([q, l]) => q === "Pick" ? l : q + l).join(", "); return k ? "picks " + k : ""; };
     const pickRow = (q, opts) => {
@@ -533,7 +558,7 @@ function card(t, kind, onDone) {
       b.insertBefore(pickRow(q, opts), at);
     }
     c.append(b);
-    if (!allQs.length && letters(b.textContent).length > 1 && cut.length) c.append(pickRow("Pick", letters(b.textContent)));
+    if (!allQs.length && !clipRows.size && letters(b.textContent).length > 1 && cut.length) c.append(pickRow("Pick", letters(b.textContent)));
   } else {
     if (t.note.where) c.append(el("div", { class: "note" }, "Where: " + t.note.where));
     if (t.note.summary.length) c.append(el("div", {}, t.note.summary.join(" ")));
@@ -552,8 +577,9 @@ function card(t, kind, onDone) {
     if (v === no && !isRev && !ta.value.trim()) { msg.textContent = "Say what to fix first."; ta.focus(); return; }
     ok.disabled = bad.disabled = true; msg.textContent = "Writing to the ticket…";
     const auto = v === no && rejectMeans.length ? "picks " + rejectMeans.join(", ") : "";
-    const note = [say() || auto, ta.value.trim()].filter(Boolean).join(" — ");
-    try { await verdict(t, kind, v[0], v[1], both, note); ta.value = ""; delete drafts[t.num]; delete drafts["p" + t.num]; if (onDone) onDone(); else renderCards(true); }
+    const note = [say() || auto, clipSay(), ta.value.trim()].filter(Boolean).join(" — ");
+    if (v === yes && clipRejected()) v = no;   // any rejected clip: the item word is rejected
+    try { await verdict(t, kind, v[0], v[1], both, note); ta.value = ""; delete drafts[t.num]; delete drafts["p" + t.num]; delete drafts["c" + t.num]; if (onDone) onDone(); else renderCards(true); }
     catch (e) { msg.textContent = "Not saved: " + e.message + ". Your comment is still here."; ok.disabled = bad.disabled = false; }
   };
   ok.addEventListener("click", () => go(yes)); bad.addEventListener("click", () => go(no));
