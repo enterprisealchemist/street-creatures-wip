@@ -10,8 +10,7 @@ Vito's private studio page over the board (the `board` issues in the private str
   capture). Good or fix with a comment, the same way (`vito-good` / `vito-fix`).
 
 Review and Release each have a **Send to Top Cat** button: it starts the `send` Action in this repo, which comments
-the decided issue numbers on the inbox PR (#12, never merged). Top Cat's Verdict runner session watches that PR, so the
-comment wakes it to run verdict_action.py and route them. It sends only issue numbers and verdict words; the runner reads
+the decided issue numbers on the inbox PR (#12, never merged). Top Cat's session watches that PR, so the comment wakes it to run verdict_action.py and route them. It sends only issue numbers and verdict words; Top Cat reads
 your comments on the private issues.
 
 ## Token
