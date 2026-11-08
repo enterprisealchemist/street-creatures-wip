@@ -58,7 +58,7 @@
   .pill { display: inline-block; font-size: 11px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); margin-left: 4px; white-space: nowrap; }
   .pill.progress, .pill.approved, .pill.good { color: var(--ok); border-color: var(--ok); }
   .pill.park { color: var(--warn); border-color: var(--warn); }
-  .pill.review, .pill.ready { color: var(--accent); border-color: var(--accent); }
+  .pill.review, .pill.pr, .pill.ready { color: var(--accent); border-color: var(--accent); }
   .pill.rejected, .pill.fix { color: var(--bad); border-color: var(--bad); }
   .scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
@@ -230,8 +230,8 @@
 <script>
 const REPO = "enterprisealchemist/street-creatures";
 const API = "https://api.github.com";
-const LIVE = ["progress", "todo", "ready", "review", "park", "proposal"];
-const ACTIVE = ["progress", "todo", "ready", "review"];
+const LIVE = ["progress", "todo", "ready", "pr", "review", "park", "proposal"];
+const ACTIVE = ["progress", "todo", "ready", "pr", "review"];
 const VAULT = "sc-wip-vault", OLD = "sc-wip-token", TOK = "sc-wip-gh", TAB = "sc-wip-tab";
 const $ = (id) => document.getElementById(id);
 let token = null, tickets = [], etag = null, timer = null, busy = false;
@@ -332,10 +332,26 @@ async function load(force) {
 }
 
 // ---- Review: open proposals, rendered by GitHub (sanitised HTML) ----
+const REVC = "sc-wip-revc";
+const revCache = (() => { try { return JSON.parse(store.get(REVC) || "{}"); } catch (e) { return {}; } })();
 async function loadReview() {
-  proposals = (await pages(`/repos/${REPO}/issues?labels=board,status:proposal&state=open`, "application/vnd.github.full+json")).map(parse);
+  const raw = await pages(`/repos/${REPO}/issues?labels=board,status:proposal&state=open`, "application/vnd.github.full+json");
+  proposals = raw.map(parse);
   // sorted once per load, so a card Vito just decided stays where it is until the next refresh
   for (const t of proposals) t.decided = t.labels.some((l) => l === "vito-approved" || l === "vito-rejected");
+  // Vito 11-08: anyone's comment after his verdict puts a decided item back in front of him as waiting
+  const keys = {}; for (const x of raw) keys[x.number] = x.updated_at;
+  await Promise.all(proposals.filter((t) => t.decided).map(async (t) => {
+    const k = "p" + t.num;
+    if (!revCache[k] || revCache[k].key !== keys[t.num]) {
+      const cs = await (await gh(`/repos/${REPO}/issues/${t.num}/comments?per_page=100`)).json();
+      const lastV = cs.map((c) => /^Vito\b/.test(c.body || "")).lastIndexOf(true);
+      const after = cs.slice(lastV + 1).filter((c) => !/^(Vito\b|Release:)/.test(c.body || ""));
+      revCache[k] = { key: keys[t.num], after: after.length };
+    }
+    if (revCache[k].after) { t.decided = false; t.newer = revCache[k].after; t.labels = t.labels.filter((l) => l !== "vito-approved" && l !== "vito-rejected"); }
+  }));
+  store.set(REVC, JSON.stringify(revCache));
 }
 // ---- Release: issues with a release note ("Release:" comment, label release-note), newest first ----
 const REL = "sc-wip-rel";
@@ -456,6 +472,7 @@ function card(t, kind, onDone) {
   const title = isRev ? t.title : (t.note.title || t.title);
   c.append(el("div", { class: "hd" }, el("span", { class: "ttl" }, title),
     el("span", {}, link(t), got ? el("span", { class: "pill " + got.slice(5) }, got.slice(5)) : null,
+      t.newer ? el("span", { class: "pill park" }, `new since your verdict (${t.newer})`) : null,
       el("span", { class: "meta" }, " · " + (t.owner || "?") + (isRev ? "" : " · " + (t.closed ? "merged " + fmtIdle(hrs(t.closed)) + " ago" : "open"))))));
   let say = () => "";   // the question picks as "picks Q1B, Q2A" (Review cards only)
   let clipSay = () => "", clipRejected = () => false, clipSync = () => {};   // clip toggles (animation batch items)
@@ -630,7 +647,7 @@ function node([id, name, role], mine) {
   const n = el("div", { class: "node" + (act.length ? "" : " quiet") },
     el("div", { class: "hd" }, el("span", {}, el("span", { class: "nm" }, name), " ", el("span", { class: "role" }, role)),
       el("span", { class: "meta" }, `${act.length} active · ${back} backlog`)));
-  const rank = { progress: 0, todo: 1, ready: 2, review: 3, proposal: 4, park: 5 };
+  const rank = { progress: 0, todo: 1, ready: 2, pr: 3, review: 3, proposal: 4, park: 5 };
   const items = act.concat(park).sort((a, b) => rank[a.status] - rank[b.status] || a.idle - b.idle);
   if (items.length) n.append(el("ul", {}, ...items.map((t) => el("li", { class: ACTIVE.includes(t.status) ? ageClass(t.idle) : null, style: ACTIVE.includes(t.status) ? null : "opacity:.6" },
     link(t), el("span", { class: "pill " + t.status }, t.status), el("span", { class: "d" }, `${t.title} · idle ${fmtIdle(t.idle)}`)))));
@@ -659,7 +676,7 @@ function renderTree() {
 function renderBoard() {
   const live = tickets.filter((t) => LIVE.includes(t.status));
   const count = (s) => tickets.filter((t) => t.status === s).length;
-  $("tiles").replaceChildren(...[["Being worked", "progress"], ["Todo", "todo"], ["Ready", "ready"], ["In review", "review"], ["Parked", "park"],
+  $("tiles").replaceChildren(...[["Being worked", "progress"], ["Todo", "todo"], ["Ready", "ready"], ["PR open", "pr"], ["Parked", "park"],
     ["Proposals", "proposal"], ["Backlog", "backlog"]].map(([lab, s]) =>
     el("div", { class: "tile" }, el("div", { class: "lab" }, lab), el("div", { class: "num" }, count(s)))));
 
