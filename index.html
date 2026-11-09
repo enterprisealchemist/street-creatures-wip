@@ -320,6 +320,7 @@ async function load(force) {
     if (r.status === 304) { render(); return; }            // unchanged: just re-age the idle times
     if (!r.ok) throw new Error(`GitHub said ${r.status}.`);
     const tag = r.headers.get("ETag");
+    loadGen += 1;
     tickets = (await pages(`/repos/${REPO}/issues?labels=board&state=open`)).map(parse);
     render();                                               // Team and Board show now; Review and Release follow
     await loadReview(); render();
@@ -392,6 +393,7 @@ function parseNote(body) {
 }
 // Captures live in the private repo: fetched with the token, shown as object URLs.
 const imgCache = {};
+let loadGen = 0;   // bumped by each full load (something on the board changed): images are re-checked once per bump
 function shot(s, into) {
   const fig = el("figure", {}, el("div", { class: "note" }, "Loading " + s.path.split("/").pop() + "…"));
   into.append(fig); fill(fig, s);
@@ -411,16 +413,24 @@ async function fill(fig, s) {
       fig.replaceChildren(box, ...(s.cap ? [el("figcaption", {}, s.cap)] : []));
       return;
     }
-    if (!imgCache[s.path]) {
-      const r = await gh(`/repos/${REPO}/contents/${s.path.split("/").map(encodeURIComponent).join("/")}?ref=master`, { headers: { Accept: "application/vnd.github.raw+json" } });
+    // Vito 11-09: a retake re-rendered under the same filename showed the old take until reload. Each full load re-asks
+    // GitHub with the file's ETag: a 304 (free, it does not count against the hourly limit) keeps it, a 200 replaces it.
+    const c = imgCache[s.path];
+    if (!c || c.gen !== loadGen) {
+      const r = await gh(`/repos/${REPO}/contents/${s.path.split("/").map(encodeURIComponent).join("/")}?ref=master`,
+        { headers: { Accept: "application/vnd.github.raw+json", ...(c && c.etag ? { "If-None-Match": c.etag } : {}) } });
+      if (r.status === 304 && c) c.gen = loadGen;
+      else {
       if (!r.ok) throw new Error(r.status);
       // GitHub labels raw files application/vnd.github.raw+json; Safari will not show an image under that type
       const ext = (s.path.split(".").pop() || "").toLowerCase();
       const type = { png: "image/png", gif: "image/gif", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", webm: "video/webm",
         mp4: "video/mp4", ogg: "audio/ogg", wav: "audio/wav", mp3: "audio/mpeg" }[ext] || "application/octet-stream";
-      imgCache[s.path] = URL.createObjectURL(new Blob([await r.blob()], { type }));
+      if (c) URL.revokeObjectURL(c.url);
+      imgCache[s.path] = { url: URL.createObjectURL(new Blob([await r.blob()], { type })), etag: r.headers.get("ETag"), gen: loadGen };
+      }
     }
-    const u = imgCache[s.path];
+    const u = imgCache[s.path].url;
     const media = /\.(webm|mp4)$/i.test(s.path) ? el("video", { src: u, controls: "", loop: "", muted: "", playsinline: "" })
       : /\.(ogg|wav|mp3)$/i.test(s.path) ? el("audio", { src: u, controls: "" }) : el("img", { src: u, alt: s.cap || s.path });
     fig.replaceChildren(media, ...(s.cap ? [el("figcaption", {}, s.cap)] : []));   // replaceChildren prints a null as "null"
