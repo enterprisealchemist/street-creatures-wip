@@ -119,6 +119,10 @@
   #focus .card .acts button { font-size: 14px; padding: 6px 16px; }
   .shots { display: flex; flex-wrap: wrap; gap: 10px; }
   .shots figure { margin: 0; max-width: 100%; } .shots figcaption { font-size: 12px; color: var(--muted); }
+  .shots video { max-width: 100%; height: auto; }
+  .shots figure.sfx { flex: 0 1 auto; }
+  .sfxbtn { font: inherit; font-size: 13px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: inherit; cursor: pointer; max-width: 100%; text-align: left; overflow-wrap: anywhere; }
+  .sfxbtn.playing { border-color: currentColor; font-weight: 600; }
   .pick { display: flex; gap: 6px; align-items: center; margin: 4px 0 12px; } .pick .q { font-size: 12px; color: var(--muted); }
   .pick button { min-width: 36px; font-weight: 600; } .pick button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
   .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -432,11 +436,27 @@ async function fill(fig, s) {
       }
     }
     const u = imgCache[s.path].url;
+    // Vito 11-12: a sound on a Review item is a play button, not a wide player or a clip, so it fits a phone and plays at a tap.
+    if (/\.(ogg|wav|mp3)$/i.test(s.path)) {
+      fig.classList.add("sfx");
+      fig.replaceChildren(el("button", { class: "sfxbtn", type: "button", "data-u": u }, "\u25B6 " + (s.cap || s.path.split("/").pop())));
+      return;
+    }
     const media = /\.(webm|mp4)$/i.test(s.path) ? el("video", { src: u, controls: "", loop: "", muted: "", playsinline: "" })
-      : /\.(ogg|wav|mp3)$/i.test(s.path) ? el("audio", { src: u, controls: "" }) : el("img", { src: u, alt: s.cap || s.path });
+      : el("img", { src: u, alt: s.cap || s.path });
     fig.replaceChildren(media, ...(s.cap ? [el("figcaption", {}, s.cap)] : []));   // replaceChildren prints a null as "null"
   } catch (e) { fig.replaceChildren(el("div", { class: "err" }, `Capture ${s.path} did not load (${e.message}).`)); }
 }
+
+// One sound at a time: a tap plays it from the start, a tap on the playing one stops it.
+const sfxPlayer = new Audio(); let sfxOn = null;
+sfxPlayer.addEventListener("ended", () => { if (sfxOn) sfxOn.classList.remove("playing"); sfxOn = null; });
+document.addEventListener("click", (e) => {
+  const b = e.target.closest && e.target.closest(".sfxbtn"); if (!b) return;
+  const same = sfxOn === b; sfxPlayer.pause(); if (sfxOn) sfxOn.classList.remove("playing"); sfxOn = null;
+  if (same) return;
+  sfxPlayer.src = b.dataset.u; sfxPlayer.currentTime = 0; sfxPlayer.play().catch(() => {}); b.classList.add("playing"); sfxOn = b;
+});
 
 // ---- Send to Top Cat: dispatches the send Action in this repo, which comments on the inbox PR Top Cat's
 // session watches (Vito 11-05). Only issue numbers and verdict words leave the page (this repo is public); Top Cat
