@@ -147,6 +147,7 @@
   .rule label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; } .rule .edit textarea { min-height: 60px; }
   .canon-doc { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; } .canon-doc textarea { min-height: 70vh; line-height: 1.45; font-family: var(--mono); }
   @media (max-width: 760px) { .canon-wrap { grid-template-columns: 1fr; } .canon-toc { position: static; max-height: 40vh; } }
+#canon-toc .pg-dir { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted, #888); margin: 12px 0 2px; }
 </style>
 </head>
 <body>
@@ -915,18 +916,21 @@ function linkify(text) {
   frag.append(text.slice(last)); return frag;
 }
 const pagePath = (name) => { const n = name.trim().toLowerCase(); if (n === "rules") return RULES; const p = canon.pages.find((x) => x.title.toLowerCase() === n || x.path === n || x.path === `canon/${n}.md`); return p ? p.path : `canon/${n.replace(/\s+/g, "_")}.md`; };
-const titleOf = (path, text) => path === RULES ? "Rules" : ((/^# (.+)$/m.exec(text || "") || [])[1] || path.replace(/^canon\/|\.md$/g, ""));
+const titleOf = (path, text) => path === RULES ? "Rules" : ((/^# (.+)$/m.exec(text || "") || [])[1] || path.replace(/^canon\/(.*\/)?|\.md$/g, ""));
 async function loadCanon(force) {
   if (!force && canon.pages.length && Date.now() - canon.at < 600000) { renderCanon(); return; }
   $("canon-stat").textContent = "Loading canon…";
   try {
     const paths = [RULES];
-    try { const r = await gh(`/repos/${REPO}/contents/canon?ref=master`); if (r.ok) for (const f of await r.json()) if (f.type === "file" && /\.md$/.test(f.name)) paths.push(f.path); } catch (e) {}
-    const pages = [];
-    for (const path of paths) {
+    // canon/ and its subfolders (canon/bible/, canon/bible/notes/ ...), top level first (Vito 11-13: "A canon/bible/ folder.").
+    const walk = async (dir) => { try { const r = await gh(`/repos/${REPO}/contents/${dir}?ref=master`); if (!r.ok) return [];
+      const ls = await r.json(), files = ls.filter((f) => f.type === "file" && /\.md$/.test(f.name)).map((f) => f.path).sort();
+      for (const d of ls.filter((f) => f.type === "dir").map((f) => f.path).sort()) files.push(...await walk(d)); return files; } catch (e) { return []; } };
+    paths.push(...await walk("canon"));
+    const pages = await Promise.all(paths.map(async (path) => {
       const j = await (await gh(`/repos/${REPO}/contents/${path}?ref=master`)).json(), text = utf8(j.content);
-      pages.push({ path, sha: j.sha, text, title: titleOf(path, text), rules: path === RULES ? parseRules(text) : null });
-    }
+      return { path, sha: j.sha, text, title: titleOf(path, text), rules: path === RULES ? parseRules(text) : null };
+    }));
     canon = { pages, at: Date.now() }; renderCanon();
   } catch (e) { $("canon-stat").textContent = e.message; }
 }
@@ -947,7 +951,10 @@ function goRule(id) {
 }
 function renderToc() {
   const q = $("canon-tq").value.trim().toLowerCase(), ed = cedits(), box = $("canon-toc"); box.replaceChildren();
+  let dir = "canon";
   for (const p of canon.pages) {
+    const pd = p.path === RULES ? "canon" : p.path.replace(/\/[^/]*$/, "");
+    if (pd !== dir) { dir = pd; box.append(el("div", { class: "pg-dir" }, pd.replace(/^canon\//, "") + "/")); }
     const hit = (s) => !q || s.toLowerCase().includes(q);
     const head = el("div", { class: "pg" + (p.path === cpage ? " on" : "") }, p.title + (changes(p).length ? " •" : "")); head.addEventListener("click", () => goPage(p.path)); box.append(head);
     const cur = p.rules ? parseRules(pageText(p)) : null, origM = p.rules ? secMap(p.text).m : null;
