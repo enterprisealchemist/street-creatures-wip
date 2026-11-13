@@ -133,13 +133,20 @@
 .mdcap table { border-collapse: collapse; margin: 8px 0; }
 .mdcap th, .mdcap td { border: 1px solid var(--line, #444); padding: 3px 8px; text-align: left; white-space: nowrap; }
 .mdcap pre { white-space: pre-wrap; }
+  .canon-wrap { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
+  .canon-toc { position: sticky; top: 8px; max-height: calc(100vh - 24px); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .canon-toc input { width: 100%; box-sizing: border-box; } .canon-toc .pg { font-weight: 600; margin-top: 6px; cursor: pointer; } .canon-toc .pg.on { color: var(--accent); }
+  .canon-toc a { display: block; font-size: 12px; color: var(--fg); text-decoration: none; padding: 2px 4px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .canon-toc a:hover { background: var(--bg); } .canon-toc a .ed { color: var(--warn); }
   .canon-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
-  .canon-tools input { flex: 1 1 220px; } select { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  select { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
   .rule .rid { font-family: var(--mono); font-weight: 600; } .rule .meta { color: var(--muted); font-size: 12px; }
   .rule blockquote { margin: 0; padding: 4px 10px; border-left: 3px solid var(--line); white-space: pre-wrap; font-size: 13px; }
   .rule .rl { font-size: 14px; } .rule.old { opacity: .6; } .rule .marks { display: flex; gap: 6px; flex-wrap: wrap; }
-  .rule .marks button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
-  .rule.m-keep { border-left: 4px solid var(--ok); } .rule.m-revise { border-left: 4px solid var(--warn); } .rule.m-retire { border-left: 4px solid var(--bad); }
+  .rule.edited { border-left: 4px solid var(--warn); } .rule.read { border-left: 4px solid var(--ok); } .rule.flash { outline: 2px solid var(--accent); }
+  .rule label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; } .rule .edit textarea { min-height: 60px; }
+  .canon-doc { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; } .canon-doc textarea { min-height: 60vh; font-family: var(--mono); }
+  @media (max-width: 760px) { .canon-wrap { grid-template-columns: 1fr; } .canon-toc { position: static; max-height: 40vh; } }
 </style>
 </head>
 <body>
@@ -237,15 +244,17 @@
       <div class="sendbar"><button class="primary send" type="button">Send to Top Cat</button><span class="note send-msg">Verdicts save to the tickets as you click. When you're done, press Send: Top Cat routes them within a few minutes.</span></div>
     </section>
     <section class="panel" id="tab-canon" hidden>
-      <div>
-        <h2>Canon: rules</h2>
-        <p class="sub">Every rule in ontology/rules.md on master, each with your exact words. Read them and mark each one Keep, Revise (rewrite the rule line in your words) or Retire. Your marks stay in this browser until you press Submit, which sends them as one doc-only PR (or, if your token can't write files, as one note on the canon-pilot ticket for Top Cat to turn into that PR).</p>
-        <div class="row canon-tools"><input id="canon-q" type="search" placeholder="Search rules, quotes, tags" aria-label="Search rules">
-          <select id="canon-f" aria-label="Show"><option value="all">All rules</option><option value="active">Active</option><option value="old">Superseded or retired</option><option value="marked">Marked by you</option><option value="unread">Not yet marked</option></select>
-          <span class="note" id="canon-stat"></span></div>
-        <div class="cards" id="canon-cards"></div>
+      <div class="canon-wrap">
+        <nav class="canon-toc" aria-label="Canon contents"><input id="canon-tq" type="search" placeholder="Search canon" aria-label="Search canon"><div id="canon-toc"></div></nav>
+        <div>
+          <h2 id="canon-title">Canon</h2>
+          <p class="sub" id="canon-sub"></p>
+          <div class="row canon-tools" id="canon-tools"><select id="canon-f" aria-label="Show"><option value="all">All rules</option><option value="active">Active</option><option value="old">Superseded or retired</option><option value="edited">Edited by you</option><option value="unread">Not yet read</option></select>
+            <span class="note" id="canon-stat"></span></div>
+          <div class="cards" id="canon-cards"></div>
+        </div>
       </div>
-      <div class="sendbar"><button class="primary" type="button" id="canon-send">Submit changes</button><span class="note" id="canon-msg">Nothing marked yet.</span></div>
+      <div class="sendbar"><button class="primary" type="button" id="canon-send">Send for merge</button><button type="button" id="canon-drop">Discard edits</button><span class="note" id="canon-msg">No edits yet.</span></div>
     </section>
   </div>
 </div>
@@ -840,106 +849,209 @@ function tab(name) {
   if (name === "canon") loadCanon(false);
 }
 
-// Canon tab (R102 pilot: rules.md). Marks live in localStorage until Submit.
-const CANON_PATH = "ontology/rules.md", CANON_ISSUE = 7345, CMARK = "sc-wip-canon-marks";
-let canon = { sha: null, text: "", rules: [], at: 0 };
-const cmarks = () => { try { return JSON.parse(store.get(CMARK) || "{}"); } catch (e) { return {}; } };
-const setCmarks = (o) => store.set(CMARK, JSON.stringify(o));
-function parseRules(text) {
-  const out = []; const parts = text.split(/^(?=## R\d+\s*$)/m);
-  for (const part of parts) {
-    const m = /^## (R\d+)\s*$/m.exec(part); if (!m) continue;
-    const field = (k) => { const f = new RegExp("^- " + k + ": (.*)$", "m").exec(part); return f ? f[1] : ""; };
-    const quote = part.split("\n").filter((l) => l.startsWith(">")).map((l) => l.replace(/^> ?/, "")).join("\n").trim();
-    out.push({ id: m[1], rule: field("rule"), date: field("date"), source: field("source"), tags: field("tags"), status: field("status"), quote });
-  }
-  return out;
-}
+// Canon tab (R102; rules.md pilot, Vito 11-13). Pages: ontology/rules.md plus every canon/*.md on master.
+// Edits are made inline and kept in this browser until "Send for merge" opens one doc-only PR
+// (or, if the token can't write files, posts them on canon-pilot #7345 for Top Cat to open).
+const RULES = "ontology/rules.md", CANON_ISSUE = 7345, CEDIT = "sc-wip-canon-edits", CREAD = "sc-wip-canon-read";
+let canon = { pages: [], at: 0 }, cpage = RULES;
+const jget = (k) => { try { return JSON.parse(store.get(k) || "{}"); } catch (e) { return {}; } };
+const cedits = () => jget(CEDIT), setCedits = (o) => store.set(CEDIT, JSON.stringify(o));
+const cread = () => jget(CREAD), setCread = (o) => store.set(CREAD, JSON.stringify(o));
 const utf8 = (b64s) => new TextDecoder().decode(unb64(b64s.replace(/\n/g, "")));
 const toB64 = (str) => { const u = new TextEncoder().encode(str); let s = ""; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
+const SPLIT = /^(?=## R\d+\s*$)/m;
+function parseRule(part) {
+  const m = /^## (R\d+)\s*$/m.exec(part); if (!m) return null;
+  const field = (k) => { const f = new RegExp("^- " + k + ": (.*)$", "m").exec(part); return f ? f[1] : ""; };
+  const quote = part.split("\n").filter((l) => l.startsWith(">")).map((l) => l.replace(/^> ?/, "")).join("\n").trim();
+  return { id: m[1], raw: part, rule: field("rule"), date: field("date"), source: field("source"), tags: field("tags"), status: field("status"), quote };
+}
+const parseRules = (text) => text.split(SPLIT).map(parseRule).filter(Boolean);
+function rebuild(part, f, day) {
+  let lines = part.split("\n");
+  const setField = (k, v, after) => {
+    const i = lines.findIndex((l) => l.startsWith("- " + k + ":"));
+    if (i >= 0) { if (v) lines[i] = `- ${k}: ${v}`; else lines.splice(i, 1); }
+    else if (v) { const j = lines.findIndex((l) => l.startsWith("- " + after + ":")); lines.splice(j >= 0 ? j + 1 : 1, 0, `- ${k}: ${v}`); }
+  };
+  setField("rule", f.rule.trim().replace(/\s+/g, " "), "##");
+  setField("tags", f.tags.trim(), "source"); setField("status", f.status.trim(), "tags");
+  if (!lines.some((l) => l.startsWith("- revised:"))) setField("revised", `Vito ${day}, WIP Canon`, "status");
+  const q0 = lines.findIndex((l) => l.startsWith(">")), q1 = lines.length - 1 - [...lines].reverse().findIndex((l) => l.startsWith(">"));
+  const q = f.quote.trim() ? f.quote.trim().split("\n").map((l) => (l.trim() ? "> " + l : ">")) : [];
+  if (q0 >= 0) lines.splice(q0, q1 - q0 + 1, ...q);
+  else if (q.length) { let e = lines.length; while (e > 0 && !lines[e - 1].trim()) e--; lines.splice(e, 0, "", ...q); }
+  return lines.join("\n");
+}
+function applyEdits(text, sections) {
+  return text.split(SPLIT).map((part) => { const m = /^## (R\d+)\s*$/m.exec(part); return m && sections[m[1]] != null ? sections[m[1]] : part; }).join("");
+}
+// Links: R54 -> that rule, #7345 -> the ticket, canon/x.md or [[x]] -> that canon page.
+function linkify(text) {
+  const frag = document.createDocumentFragment(), re = /\b(R\d{2,3})\b|#(\d{3,5})\b|\[\[([^\]]+)\]\]|\b(canon\/[\w./-]+\.md|ontology\/rules\.md)\b/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    const g = m; m = null;
+    frag.append(text.slice(last, g.index)); last = re.lastIndex;
+    if (g[1]) { const a = el("a", { href: "#" }, g[1]); a.addEventListener("click", (e) => { e.preventDefault(); goRule(g[1]); }); frag.append(a); }
+    else if (g[2]) frag.append(el("a", { href: `https://github.com/${REPO}/issues/${g[2]}`, target: "_blank", rel: "noopener" }, "#" + g[2]));
+    else { const path = g[3] ? pagePath(g[3]) : g[4], a = el("a", { href: "#" }, g[3] || g[4]); a.addEventListener("click", (e) => { e.preventDefault(); goPage(path); }); frag.append(a); }
+  }
+  frag.append(text.slice(last)); return frag;
+}
+const pagePath = (name) => { const n = name.trim().toLowerCase(); if (n === "rules") return RULES; const p = canon.pages.find((x) => x.title.toLowerCase() === n || x.path === n || x.path === `canon/${n}.md`); return p ? p.path : `canon/${n.replace(/\s+/g, "_")}.md`; };
+const titleOf = (path, text) => path === RULES ? "Rules" : ((/^# (.+)$/m.exec(text || "") || [])[1] || path.replace(/^canon\/|\.md$/g, ""));
 async function loadCanon(force) {
-  if (!force && canon.rules.length && Date.now() - canon.at < 600000) { renderCanon(); return; }
-  $("canon-stat").textContent = "Loading rules.md…";
+  if (!force && canon.pages.length && Date.now() - canon.at < 600000) { renderCanon(); return; }
+  $("canon-stat").textContent = "Loading canon…";
   try {
-    const r = await gh(`/repos/${REPO}/contents/${CANON_PATH}?ref=master`);
-    const j = await r.json(); canon = { sha: j.sha, text: utf8(j.content), rules: [], at: Date.now() };
-    canon.rules = parseRules(canon.text); renderCanon();
+    const paths = [RULES];
+    try { const r = await gh(`/repos/${REPO}/contents/canon?ref=master`); if (r.ok) for (const f of await r.json()) if (f.type === "file" && /\.md$/.test(f.name)) paths.push(f.path); } catch (e) {}
+    const pages = [];
+    for (const path of paths) {
+      const j = await (await gh(`/repos/${REPO}/contents/${path}?ref=master`)).json(), text = utf8(j.content);
+      pages.push({ path, sha: j.sha, text, title: titleOf(path, text), rules: path === RULES ? parseRules(text) : null });
+    }
+    canon = { pages, at: Date.now() }; renderCanon();
   } catch (e) { $("canon-stat").textContent = e.message; }
 }
+const curPage = () => canon.pages.find((p) => p.path === cpage) || canon.pages[0];
+function goPage(path) { if (!canon.pages.some((p) => p.path === path)) { $("canon-msg").textContent = `${path} isn't in canon yet.`; return; } cpage = path; renderCanon(); window.scrollTo(0, 0); }
+function goRule(id) {
+  cpage = RULES; $("canon-f").value = "all"; $("canon-tq").value = ""; renderCanon();
+  const c = document.getElementById("rule-" + id); if (c) { c.scrollIntoView({ behavior: "smooth", block: "start" }); c.classList.add("flash"); setTimeout(() => c.classList.remove("flash"), 1500); }
+}
+function renderToc() {
+  const q = $("canon-tq").value.trim().toLowerCase(), ed = cedits(), box = $("canon-toc"); box.replaceChildren();
+  for (const p of canon.pages) {
+    const hit = (s) => !q || s.toLowerCase().includes(q);
+    const head = el("div", { class: "pg" + (p.path === cpage ? " on" : "") }, p.title + (ed[p.path] ? " •" : "")); head.addEventListener("click", () => goPage(p.path)); box.append(head);
+    const items = p.rules ? p.rules.filter((r) => hit([r.id, r.rule, r.tags, r.quote].join(" "))).map((r) => [r.id, `${r.id} ${r.rule || r.quote.slice(0, 80)}`, ed[p.path] && ed[p.path].sections && ed[p.path].sections[r.id] != null])
+      : [...p.text.matchAll(/^#{2,3} (.+)$/gm)].map((m) => m[1]).filter((h) => hit(h) || hit(p.text)).map((h) => [h, h, false]);
+    for (const [id, label, edited] of items.slice(0, q ? 200 : 400)) {
+      const a = el("a", { href: "#", title: label }, edited ? el("span", { class: "ed" }, "✎ ") : null, label);
+      a.addEventListener("click", (e) => { e.preventDefault(); if (p.rules) goRule(id); else { cpage = p.path; renderCanon(); const h = [...document.querySelectorAll("#canon-cards h2, #canon-cards h3")].find((x) => x.textContent.trim() === id); if (h) h.scrollIntoView({ behavior: "smooth" }); } });
+      box.append(a);
+    }
+  }
+}
 function renderCanon() {
-  const q = $("canon-q").value.trim().toLowerCase(), f = $("canon-f").value, mk = cmarks(), box = $("canon-cards");
-  box.replaceChildren(); let shown = 0;
-  for (const r of canon.rules) {
-    const old = !/^active/.test(r.status), mark = mk[r.id];
-    if (f === "active" && old || f === "old" && !old || f === "marked" && !mark || f === "unread" && mark) continue;
+  renderToc(); const p = curPage(); if (!p) return;
+  const ed = cedits(), n = Object.values(ed).reduce((k, e) => k + (e.sections ? Object.keys(e.sections).length : 1), 0);
+  $("canon-msg").textContent = n ? `${n} edit${n > 1 ? "s" : ""} waiting. Send for merge opens one doc-only PR.` : "No edits yet.";
+  $("canon-title").textContent = "Canon: " + p.title; $("canon-tools").hidden = !p.rules;
+  $("n-canon").textContent = n || ""; const box = $("canon-cards"); box.replaceChildren();
+  if (!p.rules) {
+    $("canon-sub").textContent = `${p.path} on master. Edit changes the page text in place; Send for merge sends it with your other edits.`;
+    $("canon-stat").textContent = ""; box.append(docView(p, ed[p.path])); return;
+  }
+  $("canon-sub").textContent = "Every rule in ontology/rules.md on master, with your exact words. Press Edit on any rule to change it right there; links jump to other rules, tickets and canon pages. Send for merge sends all your edits as one doc-only PR.";
+  const q = $("canon-tq").value.trim().toLowerCase(), f = $("canon-f").value, rd = cread(), secs = (ed[RULES] && ed[RULES].sections) || {};
+  let shown = 0;
+  for (const r0 of p.rules) {
+    const r = secs[r0.id] != null ? Object.assign(parseRule(secs[r0.id]), { edited: true }) : r0, old = !/^active/.test(r.status);
+    if (f === "active" && old || f === "old" && !old || f === "edited" && !r.edited || f === "unread" && rd[r.id]) continue;
     if (q && ![r.id, r.rule, r.tags, r.quote, r.status].join(" ").toLowerCase().includes(q)) continue;
-    shown++; box.append(ruleCard(r, mark, old));
+    shown++; box.append(ruleCard(r0, r, old, !!rd[r.id]));
   }
-  const n = Object.keys(mk).length, ch = Object.values(mk).filter((m) => m.kind !== "keep").length;
-  $("canon-stat").textContent = `${shown} of ${canon.rules.length} shown · ${n} marked`;
-  $("n-canon").textContent = canon.rules.length - n;
-  $("canon-msg").textContent = n ? `${n} marked (${ch} revise or retire). Submit sends them as one change.` : "Nothing marked yet.";
+  $("canon-stat").textContent = `${shown} of ${p.rules.length} shown · ${Object.keys(rd).length} read`;
 }
-function ruleCard(r, mark, old) {
-  const c = el("div", { class: "card rule" + (old ? " old" : "") + (mark ? " m-" + mark.kind : "") });
-  c.append(el("div", null, el("span", { class: "rid" }, r.id), " ", el("span", { class: "meta" }, `${r.date} · ${r.status || "?"} · ${r.tags}`)));
-  c.append(el("div", { class: "rl" }, r.rule || "(no rule line: the quote below is the rule)"));
-  if (r.quote) c.append(el("blockquote", null, r.quote));
-  c.append(el("div", { class: "meta" }, "Source: " + r.source));
-  const marks = el("div", { class: "marks" }), ta = el("textarea", { placeholder: "Revise: the rule line in your words. Retire: why (optional).", "aria-label": "Revision for " + r.id });
-  ta.value = mark && mark.text || ""; ta.hidden = !mark || mark.kind === "keep";
-  const set = (kind) => { const mk = cmarks(); if (mk[r.id] && mk[r.id].kind === kind) delete mk[r.id]; else mk[r.id] = { kind, text: ta.value }; setCmarks(mk); renderCanon(); };
-  for (const [k, lbl] of [["keep", "Keep"], ["revise", "Revise"], ["retire", "Retire"]]) {
-    const b = el("button", { type: "button", "aria-pressed": String(!!mark && mark.kind === k) }, lbl); b.addEventListener("click", () => set(k)); marks.append(b);
-  }
-  ta.addEventListener("input", () => { const mk = cmarks(); if (mk[r.id]) { mk[r.id].text = ta.value; setCmarks(mk); } });
-  c.append(marks, ta); return c;
+function ruleCard(orig, r, old, read) {
+  const c = el("div", { class: "card rule" + (old ? " old" : "") + (r.edited ? " edited" : read ? " read" : ""), id: "rule-" + r.id });
+  const view = () => {
+    c.replaceChildren();
+    c.append(el("div", null, el("span", { class: "rid" }, r.id), " ", el("span", { class: "meta" }, `${r.date} · ${r.status || "?"} · ${r.tags}${r.edited ? " · edited, not sent" : ""}`)));
+    const rl = el("div", { class: "rl" }); rl.append(linkify(r.rule || "(no rule line: the quote below is the rule)")); c.append(rl);
+    if (r.quote) { const bq = el("blockquote"); bq.append(linkify(r.quote)); c.append(bq); }
+    const src = el("div", { class: "meta" }, "Source: "); src.append(linkify(r.source)); c.append(src);
+    const marks = el("div", { class: "marks" });
+    const eb = el("button", { type: "button" }, "Edit"); eb.addEventListener("click", edit);
+    const rb = el("button", { type: "button", "aria-pressed": String(read) }, read ? "Read ✓" : "Mark read");
+    rb.addEventListener("click", () => { const o = cread(); if (o[r.id]) delete o[r.id]; else o[r.id] = 1; setCread(o); renderCanon(); });
+    marks.append(eb, rb);
+    if (r.edited) { const ub = el("button", { type: "button" }, "Undo edit"); ub.addEventListener("click", () => { const e = cedits(); delete e[RULES].sections[r.id]; if (!Object.keys(e[RULES].sections).length) delete e[RULES]; setCedits(e); renderCanon(); }); marks.append(ub); }
+    c.append(marks);
+  };
+  const edit = () => {
+    c.replaceChildren(el("div", null, el("span", { class: "rid" }, r.id), " ", el("span", { class: "meta" }, "editing")));
+    const fld = (label, v, rows) => { const t = el("textarea", { rows: rows || 2 }); t.value = v; c.append(el("label", null, label, t)); return t; };
+    const fr = fld("Rule", r.rule, 3), fq = fld("Your words (quote)", r.quote, 5), ft = fld("Tags", r.tags, 1), fs = fld("Status (active, retired, superseded by Rnn…)", r.status, 1);
+    const save = el("button", { class: "primary", type: "button" }, "Save edit"), cancel = el("button", { type: "button" }, "Cancel"), retire = el("button", { type: "button" }, "Retire it");
+    retire.addEventListener("click", () => { fs.value = `retired (Vito ${new Date().toISOString().slice(5, 10)}, WIP Canon)`; });
+    cancel.addEventListener("click", view);
+    save.addEventListener("click", () => {
+      const same = fr.value.trim() === orig.rule.trim() && fq.value.trim() === orig.quote.trim() && ft.value.trim() === orig.tags.trim() && fs.value.trim() === orig.status.trim();
+      const raw = same ? orig.raw : rebuild(orig.raw, { rule: fr.value, quote: fq.value, tags: ft.value, status: fs.value }, new Date().toISOString().slice(5, 10));
+      const e = cedits(); e[RULES] = e[RULES] || { sections: {} };
+      if (raw === orig.raw) delete e[RULES].sections[r.id]; else e[RULES].sections[r.id] = raw;
+      if (!Object.keys(e[RULES].sections).length) delete e[RULES]; setCedits(e); renderCanon();
+    });
+    c.append(el("div", { class: "marks" }, save, retire, cancel)); fr.focus();
+  };
+  view(); return c;
 }
-function applyMarks(text, mk, day) {
-  return text.split(/^(?=## R\d+\s*$)/m).map((part) => {
-    const m = /^## (R\d+)\s*$/m.exec(part); const mark = m && mk[m[1]]; if (!mark || mark.kind === "keep") return part;
-    const lines = part.split("\n"); const idx = (k) => lines.findIndex((l) => l.startsWith("- " + k + ":"));
-    const note = (mark.text || "").trim().replace(/\s+/g, " ");
-    if (mark.kind === "revise" && note) { const i = idx("rule"); if (i >= 0) lines[i] = "- rule: " + note; else lines.splice(1, 0, "- rule: " + note); }
-    const si = idx("status");
-    if (mark.kind === "retire" && si >= 0) lines[si] = `- status: retired (Vito ${day}, WIP Canon${note ? ": " + note : ""})`;
-    if (mark.kind === "revise") { const at = si >= 0 ? si + 1 : 2; lines.splice(at, 0, `- revised: Vito ${day}, WIP Canon`); }
-    return lines.join("\n");
-  }).join("");
+function docView(p, e) {
+  const d = el("div", { class: "canon-doc" }), text = e && e.text != null ? e.text : p.text;
+  const show = async () => {
+    d.replaceChildren(el("p", { class: "note" }, "Rendering…"));
+    const src = text.replace(/\[\[([^\]]+)\]\]/g, (_, n) => `[${n}](${pagePath(n)})`);
+    let html = null; try { const r = await gh("/markdown", { method: "POST", body: JSON.stringify({ text: src, mode: "gfm", context: REPO }) }); if (r.ok) html = await r.text(); } catch (x) {}
+    const body = el("div"); if (html) body.innerHTML = html; else body.append(el("pre", null, src));
+    for (const a of body.querySelectorAll("a[href]")) {
+      const h = (a.getAttribute("href") || "").replace(/#.*$/, ""), rr = /^#?(R\d{2,3})$/.exec(a.getAttribute("href") || "");
+      const path = /ontology\/rules\.md$/.test(h) ? RULES : ((/(canon\/[\w.-]+\.md)$/.exec(h) || [])[1]);
+      if (path || rr) a.addEventListener("click", (ev) => { ev.preventDefault(); rr ? goRule(rr[1]) : goPage(path); });
+      else { a.target = "_blank"; a.rel = "noopener"; }
+    }
+    const walk = document.createTreeWalker(body, NodeFilter.SHOW_TEXT), nodes = [];
+    while (walk.nextNode()) if (!walk.currentNode.parentElement.closest("a, code, pre") && /\bR\d{2,3}\b|#\d{3,5}\b/.test(walk.currentNode.nodeValue)) nodes.push(walk.currentNode);
+    for (const t of nodes) t.replaceWith(linkify(t.nodeValue));
+    const eb = el("button", { type: "button" }, "Edit"); eb.addEventListener("click", edit);
+    d.replaceChildren(el("div", { class: "marks" }, eb, e ? el("span", { class: "note" }, " edited, not sent") : null), body);
+  };
+  const edit = () => {
+    const t = el("textarea"); t.value = text;
+    const save = el("button", { class: "primary", type: "button" }, "Save edit"), cancel = el("button", { type: "button" }, "Cancel");
+    cancel.addEventListener("click", show);
+    save.addEventListener("click", () => { const ed = cedits(); if (t.value === p.text) delete ed[p.path]; else ed[p.path] = { text: t.value, sha: p.sha }; setCedits(ed); renderCanon(); });
+    d.replaceChildren(el("p", { class: "note" }, "Markdown. Link a rule as R54, a ticket as #7345, a canon page as [[Page name]]."), t, el("div", { class: "marks" }, save, cancel)); t.focus();
+  };
+  show(); return d;
 }
 async function submitCanon() {
-  const mk = cmarks(), ids = Object.keys(mk); if (!ids.length) return;
-  const bad = ids.filter((id) => mk[id].kind === "revise" && !(mk[id].text || "").trim());
-  if (bad.length) { $("canon-msg").textContent = `Write the revised rule for ${bad.join(", ")} first.`; return; }
-  $("canon-send").disabled = true; $("canon-msg").textContent = "Submitting…";
-  const day = new Date().toISOString().slice(5, 10).replace("-", "-"), list = ids.map((id) => `- ${id} ${mk[id].kind}${mk[id].text ? ": " + mk[id].text.trim() : ""}`).join("\n");
+  const ed = cedits(), paths = Object.keys(ed); if (!paths.length) return;
+  $("canon-send").disabled = true; $("canon-msg").textContent = "Sending…";
   try {
     await loadCanon(true);
-    const next = applyMarks(canon.text, mk, day), branch = `canon/rules-${Date.now()}`;
+    const files = paths.map((path) => { const p = canon.pages.find((x) => x.path === path); return p && { path, sha: p.sha, text: ed[path].sections ? applyEdits(p.text, ed[path].sections) : ed[path].text }; }).filter(Boolean);
+    const list = paths.flatMap((path) => ed[path].sections ? Object.keys(ed[path].sections).map((id) => `- ${path} ${id}`) : [`- ${path} (page edit)`]).join("\n");
+    const title = `canon: Vito's edits from WIP (${list.split("\n").length})`;
     let pr = null;
     try {
-      const base = await (await gh(`/repos/${REPO}/git/ref/heads/master`)).json();
-      let r = await gh(`/repos/${REPO}/git/refs`, { method: "POST", body: JSON.stringify({ ref: "refs/heads/" + branch, sha: base.object.sha }) });
-      if (!r.ok) throw new Error("ref " + r.status);
-      r = await gh(`/repos/${REPO}/contents/${CANON_PATH}`, { method: "PUT", body: JSON.stringify({ message: `canon: Vito's rules.md marks from WIP (${ids.length})`, content: toB64(next), sha: canon.sha, branch }) });
-      if (!r.ok) throw new Error("put " + r.status);
-      r = await gh(`/repos/${REPO}/pulls`, { method: "POST", body: JSON.stringify({ title: `canon: Vito's rules.md marks from WIP (${ids.length})`, head: branch, base: "master",
-        body: `Doc-only change from the WIP Canon tab (R102 pilot, #${CANON_ISSUE}). Top Cat merges it or posts a clarification proposal.\n\n${list}` }) });
-      if (!r.ok) throw new Error("pr " + r.status); pr = await r.json();
-    } catch (e) { pr = null; }
-    if (pr) $("canon-msg").textContent = `PR #${pr.number} opened. Top Cat merges it.`;
+      const base = await (await gh(`/repos/${REPO}/git/ref/heads/master`)).json(), branch = `canon/wip-${Date.now()}`;
+      let r = await gh(`/repos/${REPO}/git/refs`, { method: "POST", body: JSON.stringify({ ref: "refs/heads/" + branch, sha: base.object.sha }) }); if (!r.ok) throw 0;
+      for (const f of files) { r = await gh(`/repos/${REPO}/contents/${f.path}`, { method: "PUT", body: JSON.stringify({ message: title, content: toB64(f.text), sha: f.sha, branch }) }); if (!r.ok) throw 0; }
+      r = await gh(`/repos/${REPO}/pulls`, { method: "POST", body: JSON.stringify({ title, head: branch, base: "master", body: `Doc-only edits from the WIP Canon tab (R102, #${CANON_ISSUE}). Top Cat merges it or posts a clarification proposal.\n\n${list}` }) });
+      if (!r.ok) throw 0; pr = await r.json();
+    } catch (x) { pr = null; }
+    let done;
+    if (pr) done = `PR #${pr.number} opened. Top Cat merges it.`;
     else {
-      const r = await gh(`/repos/${REPO}/issues/${CANON_ISSUE}/comments`, { method: "POST", body: JSON.stringify({ body: `Vito (WIP Canon): rules.md marks. Top Cat: open these as one doc-only PR on ${CANON_PATH}.\n\n${list}` }) });
+      const blocks = paths.flatMap((path) => ed[path].sections ? Object.entries(ed[path].sections).map(([id, raw]) => `#### ${path} ${id}\n\`\`\`\`markdown\n${raw.trim()}\n\`\`\`\``) : [`#### ${path} (whole page)\n\`\`\`\`markdown\n${ed[path].text.trim()}\n\`\`\`\``]);
+      let body = `Vito (WIP Canon): edits to merge. Top Cat: apply each block as written in one doc-only PR.\n\n${blocks.join("\n\n")}`;
+      if (body.length > 60000) throw new Error("Too many edits for one note: send half, then the rest.");
+      const r = await gh(`/repos/${REPO}/issues/${CANON_ISSUE}/comments`, { method: "POST", body: JSON.stringify({ body }) });
       if (!r.ok) throw new Error(`GitHub said ${r.status}.`);
-      $("canon-msg").textContent = "Sent as a note on the canon-pilot ticket; Top Cat turns it into the PR. (A token with Contents and Pull requests write opens the PR directly.)";
+      done = "Sent to Top Cat on the canon-pilot ticket; Top Cat opens and merges the PR. (A token with Contents and Pull requests write opens it directly.)";
     }
-    setCmarks({}); renderCanon();
-  } catch (e) { $("canon-msg").textContent = e.message; }
+    setCedits({}); renderCanon(); $("canon-msg").textContent = done;
+  } catch (x) { $("canon-msg").textContent = x.message || "Couldn't send."; }
   $("canon-send").disabled = false;
 }
-$("canon-q").addEventListener("input", () => renderCanon());
+$("canon-tq").addEventListener("input", () => renderCanon());
 $("canon-f").addEventListener("change", () => renderCanon());
 $("canon-send").addEventListener("click", submitCanon);
+$("canon-drop").addEventListener("click", () => { if (confirm("Discard all your unsent canon edits?")) { setCedits({}); renderCanon(); } });
 
 document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("click", () => tab(b.dataset.tab)));
 
