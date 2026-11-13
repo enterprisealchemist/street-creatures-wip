@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
 <style>
-  /* Four tabs over the live board issues: Team (hierarchy), Board, Review (proposals), Release (shipped notes). */
+  /* Five tabs (Canon: rules.md, R102) over the live board issues: Team (hierarchy), Board, Review (proposals), Release (shipped notes). */
   :root {
     --bg: #f6f5f2; --panel: #ffffff; --fg: #1d1c1a; --muted: #6b675f; --line: #dedad2;
     --accent: #3a5ccc; --ok: #2f7d4f; --warn: #b7791f; --bad: #c0392b;
@@ -133,6 +133,13 @@
 .mdcap table { border-collapse: collapse; margin: 8px 0; }
 .mdcap th, .mdcap td { border: 1px solid var(--line, #444); padding: 3px 8px; text-align: left; white-space: nowrap; }
 .mdcap pre { white-space: pre-wrap; }
+  .canon-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+  .canon-tools input { flex: 1 1 220px; } select { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .rule .rid { font-family: var(--mono); font-weight: 600; } .rule .meta { color: var(--muted); font-size: 12px; }
+  .rule blockquote { margin: 0; padding: 4px 10px; border-left: 3px solid var(--line); white-space: pre-wrap; font-size: 13px; }
+  .rule .rl { font-size: 14px; } .rule.old { opacity: .6; } .rule .marks { display: flex; gap: 6px; flex-wrap: wrap; }
+  .rule .marks button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .rule.m-keep { border-left: 4px solid var(--ok); } .rule.m-revise { border-left: 4px solid var(--warn); } .rule.m-retire { border-left: 4px solid var(--bad); }
 </style>
 </head>
 <body>
@@ -165,6 +172,7 @@
       <button role="tab" data-tab="board" type="button">Board</button>
       <button role="tab" data-tab="review" type="button">Review<span class="count" id="n-review">0</span></button>
       <button role="tab" data-tab="release" type="button">Release<span class="count" id="n-release">0</span></button>
+      <button role="tab" data-tab="canon" type="button">Canon<span class="count" id="n-canon">0</span></button>
     </nav>
 
     <section id="focus" hidden>
@@ -227,6 +235,17 @@
         <details id="release-old"><summary>Reviewed in the last 7 days</summary><div class="cards" id="release-done"></div></details>
       </div>
       <div class="sendbar"><button class="primary send" type="button">Send to Top Cat</button><span class="note send-msg">Verdicts save to the tickets as you click. When you're done, press Send: Top Cat routes them within a few minutes.</span></div>
+    </section>
+    <section class="panel" id="tab-canon" hidden>
+      <div>
+        <h2>Canon: rules</h2>
+        <p class="sub">Every rule in ontology/rules.md on master, each with your exact words. Read them and mark each one Keep, Revise (rewrite the rule line in your words) or Retire. Your marks stay in this browser until you press Submit, which sends them as one doc-only PR (or, if your token can't write files, as one note on the canon-pilot ticket for Top Cat to turn into that PR).</p>
+        <div class="row canon-tools"><input id="canon-q" type="search" placeholder="Search rules, quotes, tags" aria-label="Search rules">
+          <select id="canon-f" aria-label="Show"><option value="all">All rules</option><option value="active">Active</option><option value="old">Superseded or retired</option><option value="marked">Marked by you</option><option value="unread">Not yet marked</option></select>
+          <span class="note" id="canon-stat"></span></div>
+        <div class="cards" id="canon-cards"></div>
+      </div>
+      <div class="sendbar"><button class="primary" type="button" id="canon-send">Submit changes</button><span class="note" id="canon-msg">Nothing marked yet.</span></div>
     </section>
   </div>
 </div>
@@ -781,7 +800,7 @@ function focusList(kind) {
 }
 function openFocus(kind) {
   focus = { kind, list: focusList(kind), i: 0 };
-  for (const p of ["team", "board", "review", "release"]) $("tab-" + p).hidden = true;
+  for (const p of ["team", "board", "review", "release", "canon"]) $("tab-" + p).hidden = true;
   document.querySelector("nav.tabs").hidden = true; $("focus").hidden = false;
   showFocus();
 }
@@ -816,9 +835,112 @@ document.addEventListener("keydown", (e) => {
 // ---- tabs, lock, unlock ----
 function tab(name) {
   for (const b of document.querySelectorAll("nav.tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
-  for (const p of ["team", "board", "review", "release"]) $("tab-" + p).hidden = p !== name;
+  for (const p of ["team", "board", "review", "release", "canon"]) $("tab-" + p).hidden = p !== name;
   store.set(TAB, name);
+  if (name === "canon") loadCanon(false);
 }
+
+// Canon tab (R102 pilot: rules.md). Marks live in localStorage until Submit.
+const CANON_PATH = "ontology/rules.md", CANON_ISSUE = 7345, CMARK = "sc-wip-canon-marks";
+let canon = { sha: null, text: "", rules: [], at: 0 };
+const cmarks = () => { try { return JSON.parse(store.get(CMARK) || "{}"); } catch (e) { return {}; } };
+const setCmarks = (o) => store.set(CMARK, JSON.stringify(o));
+function parseRules(text) {
+  const out = []; const parts = text.split(/^(?=## R\d+\s*$)/m);
+  for (const part of parts) {
+    const m = /^## (R\d+)\s*$/m.exec(part); if (!m) continue;
+    const field = (k) => { const f = new RegExp("^- " + k + ": (.*)$", "m").exec(part); return f ? f[1] : ""; };
+    const quote = part.split("\n").filter((l) => l.startsWith(">")).map((l) => l.replace(/^> ?/, "")).join("\n").trim();
+    out.push({ id: m[1], rule: field("rule"), date: field("date"), source: field("source"), tags: field("tags"), status: field("status"), quote });
+  }
+  return out;
+}
+const utf8 = (b64s) => new TextDecoder().decode(unb64(b64s.replace(/\n/g, "")));
+const toB64 = (str) => { const u = new TextEncoder().encode(str); let s = ""; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
+async function loadCanon(force) {
+  if (!force && canon.rules.length && Date.now() - canon.at < 600000) { renderCanon(); return; }
+  $("canon-stat").textContent = "Loading rules.md…";
+  try {
+    const r = await gh(`/repos/${REPO}/contents/${CANON_PATH}?ref=master`);
+    const j = await r.json(); canon = { sha: j.sha, text: utf8(j.content), rules: [], at: Date.now() };
+    canon.rules = parseRules(canon.text); renderCanon();
+  } catch (e) { $("canon-stat").textContent = e.message; }
+}
+function renderCanon() {
+  const q = $("canon-q").value.trim().toLowerCase(), f = $("canon-f").value, mk = cmarks(), box = $("canon-cards");
+  box.replaceChildren(); let shown = 0;
+  for (const r of canon.rules) {
+    const old = !/^active/.test(r.status), mark = mk[r.id];
+    if (f === "active" && old || f === "old" && !old || f === "marked" && !mark || f === "unread" && mark) continue;
+    if (q && ![r.id, r.rule, r.tags, r.quote, r.status].join(" ").toLowerCase().includes(q)) continue;
+    shown++; box.append(ruleCard(r, mark, old));
+  }
+  const n = Object.keys(mk).length, ch = Object.values(mk).filter((m) => m.kind !== "keep").length;
+  $("canon-stat").textContent = `${shown} of ${canon.rules.length} shown · ${n} marked`;
+  $("n-canon").textContent = canon.rules.length - n;
+  $("canon-msg").textContent = n ? `${n} marked (${ch} revise or retire). Submit sends them as one change.` : "Nothing marked yet.";
+}
+function ruleCard(r, mark, old) {
+  const c = el("div", { class: "card rule" + (old ? " old" : "") + (mark ? " m-" + mark.kind : "") });
+  c.append(el("div", null, el("span", { class: "rid" }, r.id), " ", el("span", { class: "meta" }, `${r.date} · ${r.status || "?"} · ${r.tags}`)));
+  c.append(el("div", { class: "rl" }, r.rule || "(no rule line: the quote below is the rule)"));
+  if (r.quote) c.append(el("blockquote", null, r.quote));
+  c.append(el("div", { class: "meta" }, "Source: " + r.source));
+  const marks = el("div", { class: "marks" }), ta = el("textarea", { placeholder: "Revise: the rule line in your words. Retire: why (optional).", "aria-label": "Revision for " + r.id });
+  ta.value = mark && mark.text || ""; ta.hidden = !mark || mark.kind === "keep";
+  const set = (kind) => { const mk = cmarks(); if (mk[r.id] && mk[r.id].kind === kind) delete mk[r.id]; else mk[r.id] = { kind, text: ta.value }; setCmarks(mk); renderCanon(); };
+  for (const [k, lbl] of [["keep", "Keep"], ["revise", "Revise"], ["retire", "Retire"]]) {
+    const b = el("button", { type: "button", "aria-pressed": String(!!mark && mark.kind === k) }, lbl); b.addEventListener("click", () => set(k)); marks.append(b);
+  }
+  ta.addEventListener("input", () => { const mk = cmarks(); if (mk[r.id]) { mk[r.id].text = ta.value; setCmarks(mk); } });
+  c.append(marks, ta); return c;
+}
+function applyMarks(text, mk, day) {
+  return text.split(/^(?=## R\d+\s*$)/m).map((part) => {
+    const m = /^## (R\d+)\s*$/m.exec(part); const mark = m && mk[m[1]]; if (!mark || mark.kind === "keep") return part;
+    const lines = part.split("\n"); const idx = (k) => lines.findIndex((l) => l.startsWith("- " + k + ":"));
+    const note = (mark.text || "").trim().replace(/\s+/g, " ");
+    if (mark.kind === "revise" && note) { const i = idx("rule"); if (i >= 0) lines[i] = "- rule: " + note; else lines.splice(1, 0, "- rule: " + note); }
+    const si = idx("status");
+    if (mark.kind === "retire" && si >= 0) lines[si] = `- status: retired (Vito ${day}, WIP Canon${note ? ": " + note : ""})`;
+    if (mark.kind === "revise") { const at = si >= 0 ? si + 1 : 2; lines.splice(at, 0, `- revised: Vito ${day}, WIP Canon`); }
+    return lines.join("\n");
+  }).join("");
+}
+async function submitCanon() {
+  const mk = cmarks(), ids = Object.keys(mk); if (!ids.length) return;
+  const bad = ids.filter((id) => mk[id].kind === "revise" && !(mk[id].text || "").trim());
+  if (bad.length) { $("canon-msg").textContent = `Write the revised rule for ${bad.join(", ")} first.`; return; }
+  $("canon-send").disabled = true; $("canon-msg").textContent = "Submitting…";
+  const day = new Date().toISOString().slice(5, 10).replace("-", "-"), list = ids.map((id) => `- ${id} ${mk[id].kind}${mk[id].text ? ": " + mk[id].text.trim() : ""}`).join("\n");
+  try {
+    await loadCanon(true);
+    const next = applyMarks(canon.text, mk, day), branch = `canon/rules-${Date.now()}`;
+    let pr = null;
+    try {
+      const base = await (await gh(`/repos/${REPO}/git/ref/heads/master`)).json();
+      let r = await gh(`/repos/${REPO}/git/refs`, { method: "POST", body: JSON.stringify({ ref: "refs/heads/" + branch, sha: base.object.sha }) });
+      if (!r.ok) throw new Error("ref " + r.status);
+      r = await gh(`/repos/${REPO}/contents/${CANON_PATH}`, { method: "PUT", body: JSON.stringify({ message: `canon: Vito's rules.md marks from WIP (${ids.length})`, content: toB64(next), sha: canon.sha, branch }) });
+      if (!r.ok) throw new Error("put " + r.status);
+      r = await gh(`/repos/${REPO}/pulls`, { method: "POST", body: JSON.stringify({ title: `canon: Vito's rules.md marks from WIP (${ids.length})`, head: branch, base: "master",
+        body: `Doc-only change from the WIP Canon tab (R102 pilot, #${CANON_ISSUE}). Top Cat merges it or posts a clarification proposal.\n\n${list}` }) });
+      if (!r.ok) throw new Error("pr " + r.status); pr = await r.json();
+    } catch (e) { pr = null; }
+    if (pr) $("canon-msg").textContent = `PR #${pr.number} opened. Top Cat merges it.`;
+    else {
+      const r = await gh(`/repos/${REPO}/issues/${CANON_ISSUE}/comments`, { method: "POST", body: JSON.stringify({ body: `Vito (WIP Canon): rules.md marks. Top Cat: open these as one doc-only PR on ${CANON_PATH}.\n\n${list}` }) });
+      if (!r.ok) throw new Error(`GitHub said ${r.status}.`);
+      $("canon-msg").textContent = "Sent as a note on the canon-pilot ticket; Top Cat turns it into the PR. (A token with Contents and Pull requests write opens the PR directly.)";
+    }
+    setCmarks({}); renderCanon();
+  } catch (e) { $("canon-msg").textContent = e.message; }
+  $("canon-send").disabled = false;
+}
+$("canon-q").addEventListener("input", () => renderCanon());
+$("canon-f").addEventListener("change", () => renderCanon());
+$("canon-send").addEventListener("click", submitCanon);
+
 document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("click", () => tab(b.dataset.tab)));
 
 function lock() {
