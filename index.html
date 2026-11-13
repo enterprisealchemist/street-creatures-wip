@@ -1087,6 +1087,12 @@ async function submitCanon() {
       }
       done = "Sent to Top Cat on the canon-pilot ticket; Top Cat opens and merges the PR. (A token with Contents and Pull requests write opens it directly.)";
     }
+    // Tell Top Cat the same way Send verdicts does: the send Action comments on the inbox PR it watches.
+    try {
+      const r = await gh(`/repos/${WIP}/actions/workflows/send.yml/dispatches`, { method: "POST",
+        body: JSON.stringify({ ref: "main", inputs: { issues: `#${pr ? pr.number : CANON_ISSUE} canon` } }) });
+      done += r.status === 204 ? " Top Cat has been told." : ` (Couldn't tell Top Cat: GitHub said ${r.status}. Send verdicts reaches it too.)`;
+    } catch (x) { done += " (Couldn't tell Top Cat; Send verdicts reaches it too.)"; }
     setCedits({}); renderCanon(); $("canon-msg").textContent = done;
   } catch (x) { $("canon-msg").textContent = x.message || "Couldn't send."; }
   $("canon-send").disabled = false;

@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       issues:
-        description: verdict lines, "#<issue> <approved|rejected|good|fix>"
+        description: lines, "#<issue> <approved|rejected|good|fix>" or "#<pr or issue> canon" (Canon edits to merge)
         required: true
 permissions: { pull-requests: write }
 concurrency: { group: send, cancel-in-progress: false }
@@ -20,6 +20,6 @@ jobs:
           ISSUES: ${{ inputs.issues }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          if printf '%s\n' "$ISSUES" | grep -Eqv '^#[0-9]+ (approved|rejected|good|fix)$'; then echo "bad input line"; exit 1; fi
-          body=$(printf 'Send from the WIP page: route these verdicts (read the newest "Vito: ... (WIP page)" comment on each private issue).\n\n%s\n' "$ISSUES" | sed 's/^#/street-creatures#/')
+          if printf '%s\n' "$ISSUES" | grep -Eqv '^#[0-9]+ (approved|rejected|good|fix|canon)$'; then echo "bad input line"; exit 1; fi
+          body=$(printf 'Send from the WIP page: route these verdicts (read the newest "Vito: ... (WIP page)" comment on each private issue; a "canon" line is Vito'"'"'s Canon edits: merge that PR, or apply the newest edit comment on that issue).\n\n%s\n' "$ISSUES" | sed 's/^#/street-creatures#/')
           gh pr comment 12 -R "$GITHUB_REPOSITORY" --body "$body"
