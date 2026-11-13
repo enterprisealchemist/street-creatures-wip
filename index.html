@@ -145,7 +145,7 @@
   .rule .rl { font-size: 14px; } .rule.old { opacity: .6; } .rule .marks { display: flex; gap: 6px; flex-wrap: wrap; }
   .rule.edited { border-left: 4px solid var(--warn); } .rule.read { border-left: 4px solid var(--ok); } .rule.flash { outline: 2px solid var(--accent); }
   .rule label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; } .rule .edit textarea { min-height: 60px; }
-  .canon-doc { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; } .canon-doc textarea { min-height: 60vh; font-family: var(--mono); }
+  .canon-doc { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; } .canon-doc textarea { min-height: 70vh; line-height: 1.45; font-family: var(--mono); }
   @media (max-width: 760px) { .canon-wrap { grid-template-columns: 1fr; } .canon-toc { position: static; max-height: 40vh; } }
 </style>
 </head>
@@ -250,7 +250,7 @@
           <h2 id="canon-title">Canon</h2>
           <p class="sub" id="canon-sub"></p>
           <div class="row canon-tools" id="canon-tools"><select id="canon-f" aria-label="Show"><option value="all">All rules</option><option value="active">Active</option><option value="old">Superseded or retired</option><option value="edited">Edited by you</option><option value="unread">Not yet read</option></select>
-            <span class="note" id="canon-stat"></span></div>
+            <button type="button" id="canon-mode">Show as cards</button><span class="note" id="canon-stat"></span></div>
           <div class="cards" id="canon-cards"></div>
         </div>
       </div>
@@ -886,6 +886,21 @@ function rebuild(part, f, day) {
 function applyEdits(text, sections) {
   return text.split(SPLIT).map((part) => { const m = /^## (R\d+)\s*$/m.exec(part); return m && sections[m[1]] != null ? sections[m[1]] : part; }).join("");
 }
+// Every edit is kept as the page's whole new text; changes() lists what differs from master, rule by rule.
+const pageText = (p) => { const e = cedits()[p.path]; return !e ? p.text : e.text != null ? e.text : e.sections ? applyEdits(p.text, e.sections) : p.text; };
+const setPageText = (p, t) => { const e = cedits(); if (t === p.text) delete e[p.path]; else e[p.path] = { text: t }; setCedits(e); };
+function secMap(text) { const m = {}; let pre = ""; for (const part of text.split(SPLIT)) { const x = /^## (R\d+)\s*$/m.exec(part); if (x) m[x[1]] = part; else pre += part; } return { m, pre }; }
+function changes(p) {
+  const t = pageText(p); if (t === p.text) return [];
+  if (!p.rules) return [["whole page", t]];
+  const a = secMap(p.text), b = secMap(t), out = [];
+  if (a.pre !== b.pre) out.push(["top of file", b.pre]);
+  for (const id of Object.keys(b.m)) if (a.m[id] !== b.m[id]) out.push([id, b.m[id]]);
+  for (const id of Object.keys(a.m)) if (!(id in b.m)) out.push([id, null]);
+  return out;
+}
+const CMODE = "sc-wip-canon-mode", cmode = () => store.get(CMODE) || "text";
+let saveT = null;
 // Links: R54 -> that rule, #7345 -> the ticket, canon/x.md or [[x]] -> that canon page.
 function linkify(text) {
   const frag = document.createDocumentFragment(), re = /\b(R\d{2,3})\b|#(\d{3,5})\b|\[\[([^\]]+)\]\]|\b(canon\/[\w./-]+\.md|ontology\/rules\.md)\b/g;
@@ -918,6 +933,15 @@ async function loadCanon(force) {
 const curPage = () => canon.pages.find((p) => p.path === cpage) || canon.pages[0];
 function goPage(path) { if (!canon.pages.some((p) => p.path === path)) { $("canon-msg").textContent = `${path} isn't in canon yet.`; return; } cpage = path; renderCanon(); window.scrollTo(0, 0); }
 function goRule(id) {
+  if (cmode() === "text") {
+    cpage = RULES; renderCanon(); const ta = $("canon-editor"); if (!ta) return;
+    const i = ta.value.search(new RegExp("^## " + id + "\\s*$", "m")); if (i < 0) return;
+    ta.focus({ preventScroll: true }); ta.setSelectionRange(i, i);
+    const m = ta.cloneNode(); m.removeAttribute("id"); m.value = ta.value.slice(0, i);
+    Object.assign(m.style, { position: "absolute", visibility: "hidden", height: "0px", minHeight: "0", boxSizing: "border-box", width: ta.offsetWidth + "px", top: "0", left: "0" });
+    ta.parentElement.append(m); const y = m.scrollHeight; m.remove();
+    ta.scrollIntoView({ block: "start" }); ta.scrollTop = Math.max(0, y - 24); return;
+  }
   cpage = RULES; $("canon-f").value = "all"; $("canon-tq").value = ""; renderCanon();
   const c = document.getElementById("rule-" + id); if (c) { c.scrollIntoView({ behavior: "smooth", block: "start" }); c.classList.add("flash"); setTimeout(() => c.classList.remove("flash"), 1500); }
 }
@@ -925,8 +949,9 @@ function renderToc() {
   const q = $("canon-tq").value.trim().toLowerCase(), ed = cedits(), box = $("canon-toc"); box.replaceChildren();
   for (const p of canon.pages) {
     const hit = (s) => !q || s.toLowerCase().includes(q);
-    const head = el("div", { class: "pg" + (p.path === cpage ? " on" : "") }, p.title + (ed[p.path] ? " •" : "")); head.addEventListener("click", () => goPage(p.path)); box.append(head);
-    const items = p.rules ? p.rules.filter((r) => hit([r.id, r.rule, r.tags, r.quote].join(" "))).map((r) => [r.id, `${r.id} ${r.rule || r.quote.slice(0, 80)}`, ed[p.path] && ed[p.path].sections && ed[p.path].sections[r.id] != null])
+    const head = el("div", { class: "pg" + (p.path === cpage ? " on" : "") }, p.title + (changes(p).length ? " •" : "")); head.addEventListener("click", () => goPage(p.path)); box.append(head);
+    const cur = p.rules ? parseRules(pageText(p)) : null, origM = p.rules ? secMap(p.text).m : null;
+    const items = p.rules ? cur.filter((r) => hit([r.id, r.rule, r.tags, r.quote].join(" "))).map((r) => [r.id, `${r.id} ${r.rule || r.quote.slice(0, 80)}`, origM[r.id] !== r.raw])
       : [...p.text.matchAll(/^#{2,3} (.+)$/gm)].map((m) => m[1]).filter((h) => hit(h) || hit(p.text)).map((h) => [h, h, false]);
     for (const [id, label, edited] of items.slice(0, q ? 200 : 400)) {
       const a = el("a", { href: "#", title: label }, edited ? el("span", { class: "ed" }, "✎ ") : null, label);
@@ -935,26 +960,39 @@ function renderToc() {
     }
   }
 }
+function updMsg() {
+  const n = canon.pages.reduce((k, p) => k + changes(p).length, 0);
+  $("canon-msg").textContent = n ? `${n} change${n > 1 ? "s" : ""} waiting. Send for merge opens one doc-only PR.` : "No edits yet.";
+  $("n-canon").textContent = n || "";
+}
 function renderCanon() {
-  renderToc(); const p = curPage(); if (!p) return;
-  const ed = cedits(), n = Object.values(ed).reduce((k, e) => k + (e.sections ? Object.keys(e.sections).length : 1), 0);
-  $("canon-msg").textContent = n ? `${n} edit${n > 1 ? "s" : ""} waiting. Send for merge opens one doc-only PR.` : "No edits yet.";
+  renderToc(); const p = curPage(); if (!p) return; updMsg();
   $("canon-title").textContent = "Canon: " + p.title; $("canon-tools").hidden = !p.rules;
-  $("n-canon").textContent = n || ""; const box = $("canon-cards"); box.replaceChildren();
+  const box = $("canon-cards"); box.replaceChildren();
   if (!p.rules) {
     $("canon-sub").textContent = `${p.path} on master. Edit changes the page text in place; Send for merge sends it with your other edits.`;
-    $("canon-stat").textContent = ""; box.append(docView(p, ed[p.path])); return;
+    $("canon-stat").textContent = ""; box.append(docView(p)); return;
   }
-  $("canon-sub").textContent = "Every rule in ontology/rules.md on master, with your exact words. Press Edit on any rule to change it right there; links jump to other rules, tickets and canon pages. Send for merge sends all your edits as one doc-only PR.";
-  const q = $("canon-tq").value.trim().toLowerCase(), f = $("canon-f").value, rd = cread(), secs = (ed[RULES] && ed[RULES].sections) || {};
-  let shown = 0;
-  for (const r0 of p.rules) {
-    const r = secs[r0.id] != null ? Object.assign(parseRule(secs[r0.id]), { edited: true }) : r0, old = !/^active/.test(r.status);
+  const text = cmode() === "text"; $("canon-f").hidden = text; $("canon-mode").textContent = text ? "Show as cards" : "Edit as text";
+  if (text) {
+    $("canon-sub").textContent = "ontology/rules.md as plain markdown. Edit anything in one pass; it saves in this browser as you type. Send for merge sends your version as one doc-only PR. The contents list jumps to each rule.";
+    const d = el("div", { class: "canon-doc" }), ta = el("textarea", { id: "canon-editor", spellcheck: "true", "aria-label": "rules.md" });
+    ta.value = pageText(p);
+    ta.addEventListener("input", () => { clearTimeout(saveT); saveT = setTimeout(() => { setPageText(p, ta.value); updMsg(); }, 400); });
+    const undo = el("button", { type: "button" }, "Revert to master"); undo.addEventListener("click", () => { if (confirm("Throw away your edits to rules.md?")) { setPageText(p, p.text); renderCanon(); } });
+    d.append(ta, el("div", { class: "marks" }, undo)); box.append(d);
+    $("canon-stat").textContent = `${p.rules.length} rules on master`; return;
+  }
+  $("canon-sub").textContent = "Every rule in ontology/rules.md, with your exact words. Press Edit on any rule to change it right there; links jump to other rules, tickets and canon pages. Send for merge sends all your edits as one doc-only PR.";
+  const q = $("canon-tq").value.trim().toLowerCase(), f = $("canon-f").value, rd = cread(), origM = secMap(p.text).m;
+  let shown = 0; const cur = parseRules(pageText(p));
+  for (const r of cur) {
+    const orig = p.rules.find((x) => x.id === r.id) || r; r.edited = origM[r.id] !== r.raw; const old = !/^active/.test(r.status);
     if (f === "active" && old || f === "old" && !old || f === "edited" && !r.edited || f === "unread" && rd[r.id]) continue;
     if (q && ![r.id, r.rule, r.tags, r.quote, r.status].join(" ").toLowerCase().includes(q)) continue;
-    shown++; box.append(ruleCard(r0, r, old, !!rd[r.id]));
+    shown++; box.append(ruleCard(orig, r, old, !!rd[r.id]));
   }
-  $("canon-stat").textContent = `${shown} of ${p.rules.length} shown · ${Object.keys(rd).length} read`;
+  $("canon-stat").textContent = `${shown} of ${cur.length} shown · ${Object.keys(rd).length} read`;
 }
 function ruleCard(orig, r, old, read) {
   const c = el("div", { class: "card rule" + (old ? " old" : "") + (r.edited ? " edited" : read ? " read" : ""), id: "rule-" + r.id });
@@ -969,7 +1007,7 @@ function ruleCard(orig, r, old, read) {
     const rb = el("button", { type: "button", "aria-pressed": String(read) }, read ? "Read ✓" : "Mark read");
     rb.addEventListener("click", () => { const o = cread(); if (o[r.id]) delete o[r.id]; else o[r.id] = 1; setCread(o); renderCanon(); });
     marks.append(eb, rb);
-    if (r.edited) { const ub = el("button", { type: "button" }, "Undo edit"); ub.addEventListener("click", () => { const e = cedits(); delete e[RULES].sections[r.id]; if (!Object.keys(e[RULES].sections).length) delete e[RULES]; setCedits(e); renderCanon(); }); marks.append(ub); }
+    if (r.edited) { const ub = el("button", { type: "button" }, "Undo edit"); ub.addEventListener("click", () => { const p = curPage(); setPageText(p, applyEdits(pageText(p), { [r.id]: orig.raw })); renderCanon(); }); marks.append(ub); }
     c.append(marks);
   };
   const edit = () => {
@@ -981,17 +1019,15 @@ function ruleCard(orig, r, old, read) {
     cancel.addEventListener("click", view);
     save.addEventListener("click", () => {
       const same = fr.value.trim() === orig.rule.trim() && fq.value.trim() === orig.quote.trim() && ft.value.trim() === orig.tags.trim() && fs.value.trim() === orig.status.trim();
-      const raw = same ? orig.raw : rebuild(orig.raw, { rule: fr.value, quote: fq.value, tags: ft.value, status: fs.value }, new Date().toISOString().slice(5, 10));
-      const e = cedits(); e[RULES] = e[RULES] || { sections: {} };
-      if (raw === orig.raw) delete e[RULES].sections[r.id]; else e[RULES].sections[r.id] = raw;
-      if (!Object.keys(e[RULES].sections).length) delete e[RULES]; setCedits(e); renderCanon();
+      const raw = same ? orig.raw : rebuild(r.raw, { rule: fr.value, quote: fq.value, tags: ft.value, status: fs.value }, new Date().toISOString().slice(5, 10));
+      const p = curPage(); setPageText(p, applyEdits(pageText(p), { [r.id]: raw })); renderCanon();
     });
     c.append(el("div", { class: "marks" }, save, retire, cancel)); fr.focus();
   };
   view(); return c;
 }
-function docView(p, e) {
-  const d = el("div", { class: "canon-doc" }), text = e && e.text != null ? e.text : p.text;
+function docView(p) {
+  const d = el("div", { class: "canon-doc" }), text = pageText(p), e = text !== p.text;
   const show = async () => {
     d.replaceChildren(el("p", { class: "note" }, "Rendering…"));
     const src = text.replace(/\[\[([^\]]+)\]\]/g, (_, n) => `[${n}](${pagePath(n)})`);
@@ -1013,35 +1049,42 @@ function docView(p, e) {
     const t = el("textarea"); t.value = text;
     const save = el("button", { class: "primary", type: "button" }, "Save edit"), cancel = el("button", { type: "button" }, "Cancel");
     cancel.addEventListener("click", show);
-    save.addEventListener("click", () => { const ed = cedits(); if (t.value === p.text) delete ed[p.path]; else ed[p.path] = { text: t.value, sha: p.sha }; setCedits(ed); renderCanon(); });
+    save.addEventListener("click", () => { setPageText(p, t.value); renderCanon(); });
     d.replaceChildren(el("p", { class: "note" }, "Markdown. Link a rule as R54, a ticket as #7345, a canon page as [[Page name]]."), t, el("div", { class: "marks" }, save, cancel)); t.focus();
   };
   show(); return d;
 }
 async function submitCanon() {
-  const ed = cedits(), paths = Object.keys(ed); if (!paths.length) return;
+  clearTimeout(saveT); const ta = $("canon-editor"); if (ta && curPage()) setPageText(curPage(), ta.value);
+  if (!canon.pages.some((p) => changes(p).length)) return;
   $("canon-send").disabled = true; $("canon-msg").textContent = "Sending…";
   try {
-    await loadCanon(true);
-    const files = paths.map((path) => { const p = canon.pages.find((x) => x.path === path); return p && { path, sha: p.sha, text: ed[path].sections ? applyEdits(p.text, ed[path].sections) : ed[path].text }; }).filter(Boolean);
-    const list = paths.flatMap((path) => ed[path].sections ? Object.keys(ed[path].sections).map((id) => `- ${path} ${id}`) : [`- ${path} (page edit)`]).join("\n");
-    const title = `canon: Vito's edits from WIP (${list.split("\n").length})`;
+    const before = canon.pages.map((p) => [p.path, pageText(p)]);
+    await loadCanon(true);   // fresh sha; your text is kept as written
+    const edits = before.map(([path, t]) => { const p = canon.pages.find((x) => x.path === path); return p && t !== p.text && { p, t }; }).filter(Boolean);
+    const e0 = cedits(); for (const { p, t } of edits) e0[p.path] = { text: t }; setCedits(e0);
+    const ch = edits.map(({ p }) => [p.path, changes(p)]), list = ch.flatMap(([path, c]) => c.map(([id, raw]) => `- ${path} ${id}${raw == null ? " (removed)" : ""}`)).join("\n");
+    const n = list.split("\n").length, title = `canon: Vito's edits from WIP (${n})`;
     let pr = null;
     try {
       const base = await (await gh(`/repos/${REPO}/git/ref/heads/master`)).json(), branch = `canon/wip-${Date.now()}`;
       let r = await gh(`/repos/${REPO}/git/refs`, { method: "POST", body: JSON.stringify({ ref: "refs/heads/" + branch, sha: base.object.sha }) }); if (!r.ok) throw 0;
-      for (const f of files) { r = await gh(`/repos/${REPO}/contents/${f.path}`, { method: "PUT", body: JSON.stringify({ message: title, content: toB64(f.text), sha: f.sha, branch }) }); if (!r.ok) throw 0; }
+      for (const { p, t } of edits) { r = await gh(`/repos/${REPO}/contents/${p.path}`, { method: "PUT", body: JSON.stringify({ message: title, content: toB64(t), sha: p.sha, branch }) }); if (!r.ok) throw 0; }
       r = await gh(`/repos/${REPO}/pulls`, { method: "POST", body: JSON.stringify({ title, head: branch, base: "master", body: `Doc-only edits from the WIP Canon tab (R102, #${CANON_ISSUE}). Top Cat merges it or posts a clarification proposal.\n\n${list}` }) });
       if (!r.ok) throw 0; pr = await r.json();
     } catch (x) { pr = null; }
     let done;
     if (pr) done = `PR #${pr.number} opened. Top Cat merges it.`;
     else {
-      const blocks = paths.flatMap((path) => ed[path].sections ? Object.entries(ed[path].sections).map(([id, raw]) => `#### ${path} ${id}\n\`\`\`\`markdown\n${raw.trim()}\n\`\`\`\``) : [`#### ${path} (whole page)\n\`\`\`\`markdown\n${ed[path].text.trim()}\n\`\`\`\``]);
-      let body = `Vito (WIP Canon): edits to merge. Top Cat: apply each block as written in one doc-only PR.\n\n${blocks.join("\n\n")}`;
-      if (body.length > 60000) throw new Error("Too many edits for one note: send half, then the rest.");
-      const r = await gh(`/repos/${REPO}/issues/${CANON_ISSUE}/comments`, { method: "POST", body: JSON.stringify({ body }) });
-      if (!r.ok) throw new Error(`GitHub said ${r.status}.`);
+      const blocks = ch.flatMap(([path, c]) => c.map(([id, raw]) => raw == null ? `#### ${path} ${id}: remove it` : `#### ${path} ${id}\n\`\`\`\`markdown\n${raw.trim()}\n\`\`\`\``));
+      const parts = []; let cur = "";
+      for (const b of blocks) { if (cur && cur.length + b.length > 55000) { parts.push(cur); cur = ""; } cur += (cur ? "\n\n" : "") + b; }
+      if (cur) parts.push(cur);
+      for (let i = 0; i < parts.length; i++) {
+        const head = `Vito (WIP Canon): edits to merge${parts.length > 1 ? ` (part ${i + 1} of ${parts.length})` : ""}. Top Cat: apply each block exactly as written, in one doc-only PR.\n\n`;
+        const r = await gh(`/repos/${REPO}/issues/${CANON_ISSUE}/comments`, { method: "POST", body: JSON.stringify({ body: head + parts[i] }) });
+        if (!r.ok) throw new Error(`GitHub said ${r.status} (part ${i + 1}); your edits are still here.`);
+      }
       done = "Sent to Top Cat on the canon-pilot ticket; Top Cat opens and merges the PR. (A token with Contents and Pull requests write opens it directly.)";
     }
     setCedits({}); renderCanon(); $("canon-msg").textContent = done;
@@ -1050,8 +1093,9 @@ async function submitCanon() {
 }
 $("canon-tq").addEventListener("input", () => renderCanon());
 $("canon-f").addEventListener("change", () => renderCanon());
+$("canon-mode").addEventListener("click", () => { clearTimeout(saveT); const ta = $("canon-editor"); if (ta) setPageText(curPage(), ta.value); store.set(CMODE, cmode() === "text" ? "cards" : "text"); renderCanon(); });
 $("canon-send").addEventListener("click", submitCanon);
-$("canon-drop").addEventListener("click", () => { if (confirm("Discard all your unsent canon edits?")) { setCedits({}); renderCanon(); } });
+$("canon-drop").addEventListener("click", () => { if (confirm("Discard all your unsent canon edits?")) { clearTimeout(saveT); setCedits({}); renderCanon(); } });
 
 document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("click", () => tab(b.dataset.tab)));
 
