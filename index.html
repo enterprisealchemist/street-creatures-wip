@@ -135,7 +135,7 @@
 .mdcap pre { white-space: pre-wrap; }
   .canon-wrap { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
   .canon-toc { position: sticky; top: 8px; max-height: calc(100vh - 24px); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
-  .canon-toc input { width: 100%; box-sizing: border-box; } .canon-toc .pg { font-weight: 600; margin-top: 6px; cursor: pointer; } .canon-toc .pg.on { color: var(--accent); }
+  .canon-toc input { width: 100%; box-sizing: border-box; } .canon-toc .pg { font-weight: 600; margin-top: 6px; cursor: pointer; } .canon-toc .pg.on { color: var(--accent); } .canon-toc .pg .tw { display: inline-block; width: 1.1em; color: var(--muted, #888); }
   .canon-toc a { display: block; font-size: 12px; color: var(--fg); text-decoration: none; padding: 2px 4px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .canon-toc a:hover { background: var(--bg); } .canon-toc a .ed { color: var(--warn); }
   .canon-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
@@ -949,6 +949,7 @@ function goRule(id) {
   cpage = RULES; $("canon-f").value = "all"; $("canon-tq").value = ""; renderCanon();
   const c = document.getElementById("rule-" + id); if (c) { c.scrollIntoView({ behavior: "smooth", block: "start" }); c.classList.add("flash"); setTimeout(() => c.classList.remove("flash"), 1500); }
 }
+const tocOpen = new Set(), tocShut = new Set();   // Canon contents: headings collapse per page (Vito 11-14)
 function renderToc() {
   const q = $("canon-tq").value.trim().toLowerCase(), ed = cedits(), box = $("canon-toc"); box.replaceChildren();
   let dir = "canon";
@@ -956,7 +957,11 @@ function renderToc() {
     const pd = p.path === RULES ? "canon" : p.path.replace(/\/[^/]*$/, "");
     if (pd !== dir) { dir = pd; box.append(el("div", { class: "pg-dir" }, pd.replace(/^canon\//, "") + "/")); }
     const hit = (s) => !q || s.toLowerCase().includes(q);
-    const head = el("div", { class: "pg" + (p.path === cpage ? " on" : "") }, p.title + (changes(p).length ? " •" : "")); head.addEventListener("click", () => goPage(p.path)); box.append(head);
+    const open = !!q || (!tocShut.has(p.path) && (tocOpen.has(p.path) || p.path === cpage));
+    const tw = el("span", { class: "tw", title: open ? "Collapse" : "Expand" }, open ? "▾ " : "▸ ");
+    tw.addEventListener("click", (e) => { e.stopPropagation(); if (open) { tocOpen.delete(p.path); tocShut.add(p.path); } else { tocShut.delete(p.path); tocOpen.add(p.path); } renderToc(); });
+    const head = el("div", { class: "pg" + (p.path === cpage ? " on" : "") }, tw, p.title + (changes(p).length ? " •" : "")); head.addEventListener("click", () => { tocShut.delete(p.path); goPage(p.path); }); box.append(head);
+    if (!open) continue;
     const cur = p.rules ? parseRules(pageText(p)) : null, origM = p.rules ? secMap(p.text).m : null;
     const items = p.rules ? cur.filter((r) => hit([r.id, r.rule, r.tags, r.quote].join(" "))).map((r) => [r.id, `${r.id} ${r.rule || r.quote.slice(0, 80)}`, origM[r.id] !== r.raw])
       : [...p.text.matchAll(/^#{2,3} (.+)$/gm)].map((m) => m[1]).filter((h) => hit(h) || hit(p.text)).map((h) => [h, h, false]);
