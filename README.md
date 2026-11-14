@@ -16,7 +16,7 @@ your comments on the private issues.
 ## Token
 
 The page holds no data. Your GitHub fine-grained token is pasted once per browser and kept in that browser's local
-storage, so a refresh opens straight away (Vito 10-18: no password). **Forget token** removes it. The token is only ever
+storage, so a refresh opens straight away (Vito 10-18: no password). (Vito 11-14: no Forget token button on the page; it was one tap from locking a phone out.) The token is only ever
 sent to api.github.com. A browser still holding the old password-locked copy asks for the password once and converts it.
 
 Token permissions: street-creatures: Issues read and write, Contents read (captures); street-creatures-wip: Actions read
