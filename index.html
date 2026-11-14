@@ -853,7 +853,8 @@ function tab(name) {
 // Canon tab (R102; rules.md pilot, Vito 11-13). Pages: ontology/rules.md plus every canon/*.md on master.
 // Edits are made inline and kept in this browser until "Send for merge" opens one doc-only PR
 // (or, if the token can't write files, posts them on canon-pilot #7345 for Top Cat to open).
-const RULES = "ontology/rules.md", CANON_ISSUE = 7345, CEDIT = "sc-wip-canon-edits", CREAD = "sc-wip-canon-read";
+const RULES = "canon/rules.md"   // the locked K rules (Vito 11-14); the old R01-R122 are retired
+, CANON_ISSUE = 7345, CEDIT = "sc-wip-canon-edits", CREAD = "sc-wip-canon-read";
 let canon = { pages: [], at: 0 }, cpage = RULES;
 const jget = (k) => { try { return JSON.parse(store.get(k) || "{}"); } catch (e) { return {}; } };
 const cedits = () => jget(CEDIT), setCedits = (o) => store.set(CEDIT, JSON.stringify(o));
@@ -902,14 +903,14 @@ function changes(p) {
 }
 const CMODE = "sc-wip-canon-mode", cmode = () => store.get(CMODE) || "text";
 let saveT = null;
-// Links: R54 -> that rule, #7345 -> the ticket, canon/x.md or [[x]] -> that canon page.
+// Links: K05a -> that rule, #7345 -> the ticket, canon/x.md or [[x]] -> that canon page.
 function linkify(text) {
-  const frag = document.createDocumentFragment(), re = /\b(R\d{2,3})\b|#(\d{3,5})\b|\[\[([^\]]+)\]\]|\b(canon\/[\w./-]+\.md|ontology\/rules\.md)\b/g;
+  const frag = document.createDocumentFragment(), re = /\b(K\d{2}[a-z]?)\b|#(\d{3,5})\b|\[\[([^\]]+)\]\]|\b(canon\/[\w./-]+\.md|ontology\/rules\.md)\b/g;
   let last = 0, m;
   while ((m = re.exec(text))) {
     const g = m; m = null;
     frag.append(text.slice(last, g.index)); last = re.lastIndex;
-    if (g[1]) { const a = el("a", { href: "#" }, g[1]); a.addEventListener("click", (e) => { e.preventDefault(); goRule(g[1]); }); frag.append(a); }
+    if (g[1]) { const a = el("a", { href: "#" }, g[1]); a.addEventListener("click", (e) => { e.preventDefault(); goK(g[1]); }); frag.append(a); }
     else if (g[2]) frag.append(el("a", { href: `https://github.com/${REPO}/issues/${g[2]}`, target: "_blank", rel: "noopener" }, "#" + g[2]));
     else { const path = g[3] ? pagePath(g[3]) : g[4], a = el("a", { href: "#" }, g[3] || g[4]); a.addEventListener("click", (e) => { e.preventDefault(); goPage(path); }); frag.append(a); }
   }
@@ -927,10 +928,11 @@ async function loadCanon(force) {
       const ls = await r.json(), files = ls.filter((f) => f.type === "file" && /\.md$/.test(f.name)).map((f) => f.path).sort();
       for (const d of ls.filter((f) => f.type === "dir").map((f) => f.path).sort()) files.push(...await walk(d)); return files; } catch (e) { return []; } };
     paths.push(...await walk("canon"));
-    const pages = await Promise.all(paths.map(async (path) => {
-      const j = await (await gh(`/repos/${REPO}/contents/${path}?ref=master`)).json(), text = utf8(j.content);
-      return { path, sha: j.sha, text, title: titleOf(path, text), rules: path === RULES ? parseRules(text) : null };
-    }));
+    const pages = (await Promise.all([...new Set(paths)].map(async (path) => {
+      const j = await (await gh(`/repos/${REPO}/contents/${path}?ref=master`)).json(); if (!j.content) return null;
+      const text = utf8(j.content);
+      return { path, sha: j.sha, text, title: titleOf(path, text), rules: null };   // K rules edit as a whole page, like Vito's V: notes
+    }))).filter(Boolean);
     canon = { pages, at: Date.now() }; renderCanon();
   } catch (e) { $("canon-stat").textContent = e.message; }
 }
@@ -950,6 +952,11 @@ function goRule(id) {
   const c = document.getElementById("rule-" + id); if (c) { c.scrollIntoView({ behavior: "smooth", block: "start" }); c.classList.add("flash"); setTimeout(() => c.classList.remove("flash"), 1500); }
 }
 const tocOpen = new Set(), tocShut = new Set();   // Canon contents: headings collapse per page (Vito 11-14)
+function goK(id) {   // K05a -> its heading on the Rules page
+  cpage = RULES; renderCanon();
+  const h = [...document.querySelectorAll("#canon-cards h2, #canon-cards h3")].find((x) => x.textContent.trim().startsWith(id + "."));
+  if (h) h.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 function renderToc() {
   const q = $("canon-tq").value.trim().toLowerCase(), ed = cedits(), box = $("canon-toc"); box.replaceChildren();
   let dir = "canon";
