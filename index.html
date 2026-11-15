@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
 <style>
-  /* Five tabs (Canon: rules.md, R102) over the live board issues: Team (hierarchy), Board, Review (proposals), Release (shipped notes). */
+  /* Four tabs (Canon: rules.md, R102) over the live board issues: Board, Review (proposals), Release (shipped notes). */
   :root {
     --bg: #f6f5f2; --panel: #ffffff; --fg: #1d1c1a; --muted: #6b675f; --line: #dedad2;
     --accent: #3a5ccc; --ok: #2f7d4f; --warn: #b7791f; --bad: #c0392b;
@@ -78,18 +78,31 @@
   .empty { color: var(--muted); font-size: 13px; }
   h3.group { margin: 22px 0 2px; font-size: 15px; }
   h3.group:first-of-type { margin-top: 10px; }
-  /* Team: one tree, leads with their workers indented under them */
-  .tree { display: flex; flex-direction: column; gap: 10px; }
-  .tree .kids { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-left: 18px; padding-left: 12px; border-left: 2px solid var(--line); }
-  .node { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-  .node.quiet { opacity: .7; }
-  .node .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-  .node .nm { font-weight: 600; } .node .role { color: var(--muted); font-size: 12px; }
-  .node ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
-  .node li { padding-left: 8px; border-left: 2px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
-  .node li.warn { border-left-color: var(--warn); } .node li.bad { border-left-color: var(--bad); }
-  .node li .d { color: var(--muted); display: block; }
-  .branch { display: flex; flex-direction: column; gap: 10px; }
+  /* Board filters (Vito 11-16): search, milestone switch, lead rows, filterable tiles, expandable rows */
+  .board-tools { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .board-q { flex: 1 1 220px; min-width: 0; }
+  .milestone { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .mswitch { display: flex; gap: 4px; }
+  .mswitch button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mbar { width: 160px; max-width: 100%; height: 10px; }
+  .milestone .note { margin-right: auto; }
+  .leads { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .leadrow { width: 100%; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; text-align: left;
+             background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
+  .leadrow.on { outline: 2px solid var(--accent); }
+  .leadrow .nm { font-weight: 600; }
+  .leadrow .meta { color: var(--muted); }
+  .tile { text-align: left; width: 100%; }
+  .tile.on { outline: 2px solid var(--accent); }
+  .rowclick { cursor: pointer; }
+  tr.detail > td { background: color-mix(in srgb, var(--line) 22%, transparent); }
+  .detail-box { display: flex; flex-direction: column; gap: 8px; }
+  .detail-h { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .detail-quote, .detail-cur { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; max-height: 240px; overflow: auto; }
+  .cbox { display: flex; flex-direction: column; gap: 6px; }
+  .rowdetail { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin-top: -1px; }
+  .waitrow { margin-top: 6px; border-left-color: var(--line); }
+  .waitrow .why { overflow-wrap: anywhere; }
   /* Review and Release cards */
   .cards { display: flex; flex-direction: column; gap: 12px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
@@ -176,7 +189,6 @@
 
   <div id="app" hidden>
     <nav class="tabs" role="tablist">
-      <button role="tab" data-tab="team" type="button">Team</button>
       <button role="tab" data-tab="board" type="button">Board</button>
       <button role="tab" data-tab="review" type="button">Review<span class="count" id="n-review">0</span></button>
       <button role="tab" data-tab="release" type="button">Release<span class="count" id="n-release">0</span></button>
@@ -190,32 +202,35 @@
       <p class="note">Ctrl+Enter (⌘+Enter) approves. ← and → move when you're not typing.</p>
     </section>
 
-    <section class="panel" id="tab-team" hidden>
-      <div>
-        <h2>Team</h2>
-        <p class="sub">Who leads whom, and each person's active tickets (being worked, todo, ready, in review; parked shown dimmed). A ticket sits with its owner.</p>
-        <div class="tree" id="tree"></div>
-      </div>
-    </section>
-
     <section class="panel" id="tab-board" hidden>
-      <section><div class="tiles" id="tiles"></div></section>
+      <section>
+        <div class="board-tools"><input type="search" id="board-q" class="board-q" placeholder="Search ids and titles" aria-label="Search tickets"></div>
+        <div class="milestone" id="milestone"></div>
+        <div class="leads" id="leads"></div>
+        <div class="tiles" id="tiles"></div>
+      </section>
       <section>
         <h2>Needs a nudge</h2>
         <p class="sub">In flight with no activity for 4 h or more (red past 24 h), or with nobody named next.</p>
         <div class="nudges" id="nudges"></div>
       </section>
       <section>
+        <h2>Waiting on</h2>
+        <p class="sub">Tickets blocked on Vito, on art, or on another ticket. One whose blocker is already closed is marked.</p>
+        <div id="waiting"></div>
+      </section>
+      <section>
         <h2>In flight</h2>
-        <p class="sub">Being worked, todo, ready, in review, parked or proposed; longest idle first.</p>
+        <p class="sub">Being worked, todo, ready, in review, parked or proposed; longest idle first. Click a row for the details and a note box.</p>
         <div class="scroll"><table><thead><tr><th>Ticket</th><th>Status</th><th>Owner</th><th>Next</th><th>Doing</th><th>Idle</th></tr></thead><tbody id="flight-rows"></tbody></table></div>
       </section>
       <section>
         <h2>Backlog</h2>
-        <p class="sub">Approved and not started, in the order <span class="tk">board.py next</span> pulls them (lower number first). Change a number, or move a ticket up or down; it writes the ticket's priority and leaves a note on it.</p>
+        <p class="sub">Approved and not started, in the order <span class="tk">board.py next</span> pulls them (lower number first). Change a number, or move a ticket up or down; it writes the ticket's priority and leaves a note on it. Click a row for the details and a note box.</p>
         <div id="backlog-err" class="err" hidden></div>
         <div class="scroll"><table><thead><tr><th>Priority</th><th>Ticket</th><th>Owner</th><th>Can pull</th><th>Title</th><th>Idle</th></tr></thead><tbody id="backlog-rows"></tbody></table></div>
       </section>
+      <div class="sendbar"><button class="primary send" type="button">Send to Top Cat</button><span class="note send-msg">Notes you post save to the tickets. When you're done, press Send: Top Cat routes them within a few minutes.</span></div>
     </section>
 
     <section class="panel" id="tab-review" hidden>
@@ -272,6 +287,9 @@ let proposals = [], releases = [], relDone = [];
 const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
                 set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
                 del(k) { try { localStorage.removeItem(k); } catch (e) {} } };
+// Board filters (Vito 11-16): the count tiles, the milestone switch, the lead rows and the search box all set one state.
+let closedTickets = [], closedIds = new Set();
+const bf = { status: "", stage: store.get("sc-wip-stage") || "M1", lead: "", q: "" };
 
 function el(tag, attrs, ...kids) {
   const n = document.createElement(tag);
@@ -312,6 +330,7 @@ function parse(issue) {
   return {
     id, num: issue.number, url: issue.html_url, title: i < 0 ? "" : issue.title.slice(i + 2),
     status: h.status || "backlog", owner: (h.owner || "").toLowerCase(), can: h.can || "", blocked: h.blocked || "",
+    stage: h.stage || "", batch: h.batch || "", updated: issue.updated_at,
     priority: /^\d+$/.test(h.priority || "") ? Number(h.priority) : 99,
     nextWho: c > 0 && !next.slice(0, c).includes(" ") ? next.slice(0, c).trim().toLowerCase() : "",
     next: c > 0 && !next.slice(0, c).includes(" ") ? next.slice(c + 1).trim() : next,
@@ -355,7 +374,13 @@ async function load(force) {
     const tag = r.headers.get("ETag");
     loadGen += 1;
     tickets = (await pages(`/repos/${REPO}/issues?labels=board&state=open`)).map(parse);
-    render();                                               // Team and Board show now; Review and Release follow
+    // Closed board tickets: done counts on the milestone bar and lead rows, and the "blocker closed" mark.
+    try {
+      closedTickets = (await pages(`/repos/${REPO}/issues?labels=board&state=closed&sort=updated&direction=desc`)).map(parse);
+    } catch (e) { closedTickets = []; }
+    closedIds = new Set();
+    for (const t of closedTickets) { closedIds.add(t.id); closedIds.add("#" + t.num); }
+    render();                                               // Board shows now; Review and Release follow
     await loadReview(); render();
     await loadRelease(); render();
     etag = tag;                                             // only after a full load, so a failed load is retried
@@ -696,58 +721,147 @@ function renderCards(force) {
   $("n-review").textContent = open("review"); $("n-release").textContent = open("release");
 }
 
-// ---- Team: the hierarchy (CLAUDE.md "Who's who") ----
-const TEAM = [
-  ["vito", "Vito", "Owner, the gate", [["puss", "Puss in Boots", "Executive Producer, backstop", []]]],
-  ["tc", "Top Cat", "Product Owner", [
-    ["felix", "Felix", "Technical Director", [["sylvester", "Sylvester", "gameplay (subagent)", []], ["heathcliff", "Heathcliff", "perf (subagent)", []]]],
-    ["fritz", "Fritz", "Art Director", [["azrael", "Azrael", "production art (subagent)", []], ["figaro", "Figaro", "detail art (subagent)", []]]],
-  ]],
-  ["garfield", "Garfield", "Scrum Master, budget, itch", [["sc", "Scat Cat", "audio (subagent)", []], ["cheshire", "Cheshire", "copy (subagent)", []]]],
-];
-const ALIAS = { topcat: "tc", "top cat": "tc", scatcat: "sc", "scat cat": "sc" };
-function node([id, name, role], mine) {
-  const act = mine.filter((t) => ACTIVE.includes(t.status)), park = mine.filter((t) => t.status === "park" || t.status === "proposal");
-  const back = mine.filter((t) => t.status === "backlog").length;
-  const n = el("div", { class: "node" + (act.length ? "" : " quiet") },
-    el("div", { class: "hd" }, el("span", {}, el("span", { class: "nm" }, name), " ", el("span", { class: "role" }, role)),
-      el("span", { class: "meta" }, `${act.length} active · ${back} backlog`)));
-  const rank = { progress: 0, todo: 1, ready: 2, pr: 3, review: 3, proposal: 4, park: 5 };
-  const items = act.concat(park).sort((a, b) => rank[a.status] - rank[b.status] || a.idle - b.idle);
-  if (items.length) n.append(el("ul", {}, ...items.map((t) => el("li", { class: ACTIVE.includes(t.status) ? ageClass(t.idle) : null, style: ACTIVE.includes(t.status) ? null : "opacity:.6" },
-    link(t), el("span", { class: "pill " + t.status }, t.status), el("span", { class: "d" }, `${t.title} · idle ${fmtIdle(t.idle)}`)))));
-  else n.append(el("div", { class: "empty" }, "Nothing active"));
-  return n;
+// ---- Board ----
+// The Board's filters (Vito 11-16): shownBase checks the stage, lead and search filters; shown adds the status one.
+function shownBase(t) {
+  if (bf.stage && t.stage !== bf.stage) return false;
+  if (bf.lead && t.owner !== bf.lead) return false;
+  if (bf.q) { const q = bf.q.toLowerCase(); if (!(t.id + " " + t.title + " #" + t.num + " " + t.num).toLowerCase().includes(q)) return false; }
+  return true;
 }
-function renderTree() {
-  const by = {};
-  for (const t of tickets) { const o = ALIAS[t.owner] || t.owner || "?"; (by[o] = by[o] || []).push(t); }
-  const known = new Set();
-  const build = (spec) => {
-    known.add(spec[0]);
-    const kids = spec[3];
-    const me = node(spec, by[spec[0]] || []);
-    if (!kids.length) return me;
-    return el("div", { class: "branch" }, me, el("div", { class: "kids" }, ...kids.map(build)));
-  };
-  const parts = TEAM.map(build);
-  const other = Object.keys(by).filter((o) => !known.has(o)).sort();
-  if (other.length) parts.push(el("div", { class: "branch" }, el("h2", {}, "Not on the chart"), el("div", { class: "kids" },
-    ...other.map((o) => node([o, o === "pool" ? "Pool" : o, o === "pool" ? "unclaimed, anyone allowed by can=" : "owner id on the ticket", []], by[o])))));
-  $("tree").replaceChildren(...parts);
+function shown(t) { return (!bf.status || t.status === bf.status) && shownBase(t); }
+
+// Rows that are open (issue number), kept across a refresh.
+const openRows = new Set();
+// The detail under a row: Vito's words, the Current block, and a note box (Vito 11-16 "add a note whenever something needs to change").
+function buildDetail(box, t) {
+  const lines = (t.rest || "").split("\n");
+  const quote = [];
+  for (const line of lines) { if (/^### /.test(line)) break; if (/^Vito\b/.test(line) || /^> /.test(line) || /^>$/.test(line)) quote.push(line); }
+  if (quote.length) { box.append(el("div", { class: "detail-h" }, "Vito's words"), el("pre", { class: "detail-quote" }, quote.slice(0, 12).join("\n"))); }
+  const ci = lines.findIndex((l) => /^(#{1,4}\s*Current\b|\*\*Current\b|Current:)/i.test(l));
+  if (ci >= 0) {
+    const cur = [];
+    for (let i = ci; i < lines.length; i++) { const l = lines[i]; if (i > ci && (l.startsWith("#") || l.startsWith("---"))) break; const v = i === ci ? l.replace(/^(#{1,4}\s*Current\b\W*|\*\*Current[^*]*\*\*\W*|Current:\s*)/i, "") : l; if (i > ci || v.trim()) cur.push(v); }
+    while (cur.length && !cur[cur.length - 1].trim()) cur.pop();
+    box.append(el("div", { class: "detail-h" }, "Current"), el("pre", { class: "detail-cur" }, cur.join("\n")));
+  }
+  box.append(commentBox(t));
+}
+function commentBox(t) {
+  const wrap = el("div", { class: "cbox" });
+  const ta = el("textarea", { rows: "3", placeholder: "Note for Top Cat", "aria-label": "Note for " + t.id });
+  const btn = el("button", { class: "primary", type: "button" }, "Post note");
+  const msg = el("span", { class: "note" });
+  btn.addEventListener("click", async () => {
+    const text = ta.value.trim();
+    if (!text) { msg.textContent = "Type a note first."; ta.focus(); return; }
+    btn.disabled = true; msg.textContent = "Posting…";
+    try {
+      const r = await gh(`/repos/${REPO}/issues/${t.num}/comments`, { method: "POST", body: JSON.stringify({ body: `Vito: note — ${text} (WIP page)` }) });
+      if (!r.ok) throw new Error(`GitHub said ${r.status}`);
+      const p = pending(); p[t.num] = "note"; setPending(p);
+      ta.value = ""; msg.textContent = "Posted. Press Send to Top Cat to route it.";
+    } catch (e) { msg.textContent = "Not posted: " + e.message; }
+    finally { btn.disabled = false; }
+  });
+  wrap.append(ta, el("div", { class: "acts" }, btn, msg));
+  return wrap;
+}
+function detailTr(row, t) {
+  const tr = el("tr", { class: "detail" }), td = el("td", { colspan: String(row.children.length) });
+  const b = el("div", { class: "detail-box" }); buildDetail(b, t); td.append(b); tr.append(td); return tr;
+}
+function rowDetail(t) { const d = el("div", { class: "rowdetail" }), b = el("div", { class: "detail-box" }); buildDetail(b, t); d.append(b); return d; }
+function attachDetail(node, t, isTable) {
+  node.classList.add("rowclick");
+  node.addEventListener("click", (e) => {
+    if (e.target.closest && e.target.closest("a, input, button, textarea, select, label")) return;
+    const nextEl = node.nextElementSibling, cls = isTable ? "detail" : "rowdetail";
+    if (nextEl && nextEl.classList.contains(cls)) { nextEl.remove(); openRows.delete(t.num); return; }
+    node.after(isTable ? detailTr(node, t) : rowDetail(t)); openRows.add(t.num);
+  });
 }
 
-// ---- Board ----
+function renderMilestone() {
+  const box = $("milestone"); box.replaceChildren();
+  const sw = el("div", { class: "mswitch", role: "group", "aria-label": "Milestone" });
+  for (const [lab, v] of [["M1", "M1"], ["M2", "M2"], ["Stage 3", "3"]]) {
+    const b = el("button", { type: "button", class: bf.stage === v ? "on" : null, "aria-pressed": String(bf.stage === v) }, lab);
+    b.addEventListener("click", () => { bf.stage = v; store.set("sc-wip-stage", v); renderBoard(); });
+    sw.append(b);
+  }
+  const stageT = tickets.filter((t) => t.stage === bf.stage);
+  const left = stageT.filter((t) => t.status !== "done" && t.status !== "merged").length;
+  const done = stageT.filter((t) => t.status === "done" || t.status === "merged").length + closedTickets.filter((t) => t.stage === bf.stage).length;
+  const total = done + left, pct = total ? Math.round((done / total) * 100) : 0;
+  box.append(sw, el("progress", { class: "mbar", max: "100", value: String(pct) }),
+    el("span", { class: "note" }, `${bf.stage}: ${left} left · ${done} done (recent)`));
+}
+function renderLeads() {
+  const box = $("leads"); box.replaceChildren();
+  const okStatus = ["progress", "todo", "ready", "pr"], stageT = tickets.filter((t) => t.stage === bf.stage);
+  const owners = [...new Set(stageT.filter((t) => t.batch && okStatus.includes(t.status) && t.owner).map((t) => t.owner))];
+  for (const owner of owners) {
+    const mine = stageT.filter((t) => t.owner === owner).sort((a, b) => a.priority - b.priority || a.num - b.num);
+    const pick = (s) => mine.find((t) => t.status === s);
+    const lead = pick("progress") || pick("todo") || mine.find((t) => t.batch) || mine[0], batch = lead ? lead.batch : "";
+    if (!batch) continue;
+    const openB = tickets.filter((t) => t.batch === batch), doneB = closedTickets.filter((t) => t.batch === batch);
+    const done = doneB.length + openB.filter((t) => t.status === "done" || t.status === "merged").length;
+    const left = openB.filter((t) => t.status !== "done" && t.status !== "merged").length;
+    const idle = Math.min(...mine.map((t) => t.idle));
+    const row = el("button", { type: "button", class: "leadrow" + (bf.lead === owner ? " on" : ""), "aria-pressed": String(bf.lead === owner) },
+      el("span", { class: "nm" }, owner), el("span", { class: "meta" }, `${batch} · ${done} done · ${left} left · touched ${fmtIdle(idle)} ago`));
+    row.addEventListener("click", () => { bf.lead = bf.lead === owner ? "" : owner; renderBoard(); });
+    box.append(row);
+  }
+}
+function renderWaiting() {
+  const box = $("waiting"); box.replaceChildren();
+  const wait = tickets.filter(shown).filter((t) => t.blocked || t.nextWho === "vito");
+  const groups = [["Vito", []], ["Art", []], ["Another ticket", []]];
+  for (const t of wait) {
+    const refs = (t.blocked || "").match(/#\d+|[a-z0-9]+(?:-[a-z0-9]+)+/gi) || [];
+    const isTicket = refs.some((r) => closedIds.has(r) || tickets.some((o) => o.id === r || "#" + o.num === r));
+    if ((t.blocked || "").toLowerCase().startsWith("vito") || t.nextWho === "vito") groups[0][1].push(t);
+    else if (isTicket) groups[2][1].push(t);
+    else if (/art|fritz|approved|clip|tile|sprite|portrait/i.test(t.blocked || "")) groups[1][1].push(t);
+    else groups[2][1].push(t);
+  }
+  const any = groups.some((g) => g[1].length);
+  for (const [name, list] of groups) {
+    if (!list.length) continue;
+    box.append(el("h3", { class: "group" }, name));
+    box.append(...list.flatMap((t) => {
+      const blocked = t.blocked || "";
+      const closed = [...blocked.matchAll(/#(\d+)/g)].some((m) => closedIds.has("#" + m[1]))
+        || [...blocked.matchAll(/[a-z0-9]+(?:-[a-z0-9]+)+/g)].some((m) => closedIds.has(m[0]));
+      const row = el("div", { class: "nudge waitrow" + (closed ? " bad" : "") },
+        el("div", {}, link(t), el("span", { class: "pill " + t.status }, t.status), " ", el("span", { class: "meta" }, t.owner || "?")),
+        el("div", { class: "why" }, blocked || ("next: " + t.nextWho)),
+        closed ? el("div", { class: "meta" }, "blocker closed") : null);
+      attachDetail(row, t, false);
+      return openRows.has(t.num) ? [row, rowDetail(t)] : [row];
+    }));
+  }
+  if (!any) box.append(el("div", { class: "empty" }, "Nothing waiting."));
+}
 function renderBoard() {
+  renderMilestone(); renderLeads();
   const live = tickets.filter((t) => LIVE.includes(t.status));
-  const count = (s) => tickets.filter((t) => t.status === s).length;
+  const count = (s) => tickets.filter((t) => t.status === s && shownBase(t)).length;
   $("tiles").replaceChildren(...[["Being worked", "progress"], ["Todo", "todo"], ["Ready", "ready"], ["PR open", "pr"], ["Parked", "park"],
-    ["Proposals", "proposal"], ["Backlog", "backlog"]].map(([lab, s]) =>
-    el("div", { class: "tile" }, el("div", { class: "lab" }, lab), el("div", { class: "num" }, count(s)))));
+    ["Proposals", "proposal"], ["Backlog", "backlog"]].map(([lab, s]) => {
+    const b = el("button", { type: "button", class: "tile" + (bf.status === s ? " on" : ""), "aria-pressed": String(bf.status === s) },
+      el("div", { class: "lab" }, lab), el("div", { class: "num" }, count(s)));
+    b.addEventListener("click", () => { bf.status = bf.status === s ? "" : s; renderBoard(); });
+    return b;
+  }));
 
   const quiet = (t) => t.status === "park" || t.status === "proposal";
   const nudges = live.filter((t) => !quiet(t) && (t.idle >= 4 || !t.nextWho))
-    .concat(live.filter((t) => quiet(t) && (t.idle >= 24 || !t.nextWho))).sort((a, b) => b.idle - a.idle);
+    .concat(live.filter((t) => quiet(t) && (t.idle >= 24 || !t.nextWho))).filter(shown).sort((a, b) => b.idle - a.idle);
   $("nudges").replaceChildren(...(nudges.length ? nudges.map((t) => {
     const why = !t.nextWho ? "No one named next" : `${t.nextWho} has not touched it for ${fmtIdle(t.idle)}`;
     return el("div", { class: "nudge" + (t.idle >= 24 || !t.nextWho ? " bad" : "") },
@@ -756,26 +870,34 @@ function renderBoard() {
       el("div", { class: "why" }, why + (t.next ? " · " + t.next : "")));
   }) : [el("div", { class: "empty" }, "Nothing stalled.")]));
 
-  $("flight-rows").replaceChildren(...live.slice().sort((a, b) => b.idle - a.idle).map((t) =>
-    el("tr", { class: ageClass(t.idle) }, el("td", {}, link(t)), el("td", {}, el("span", { class: "pill " + t.status }, t.status)),
-      el("td", {}, t.owner), el("td", {}, t.nextWho || "—"), el("td", { class: "nx" }, t.next), el("td", { class: "n" }, fmtIdle(t.idle)))));
+  const flight = live.filter(shown).sort((a, b) => b.idle - a.idle);
+  $("flight-rows").replaceChildren(...flight.flatMap((t) => {
+    const tr = el("tr", { class: ageClass(t.idle) }, el("td", {}, link(t)), el("td", {}, el("span", { class: "pill " + t.status }, t.status)),
+      el("td", {}, t.owner), el("td", {}, t.nextWho || "—"), el("td", { class: "nx" }, t.next), el("td", { class: "n" }, fmtIdle(t.idle)));
+    attachDetail(tr, t, true);
+    return openRows.has(t.num) ? [tr, detailTr(tr, t)] : [tr];
+  }));
 
-  const back = tickets.filter((t) => t.status === "backlog").sort((a, b) => a.priority - b.priority || a.num - b.num);
-  $("backlog-rows").replaceChildren(...back.map((t, i) => {
+  const back = tickets.filter((t) => t.status === "backlog").filter(shown).sort((a, b) => a.priority - b.priority || a.num - b.num);
+  $("backlog-rows").replaceChildren(...back.flatMap((t, i) => {
     const inp = el("input", { type: "number", min: "0", step: "1", value: t.priority, "aria-label": "Priority of " + t.id, id: "p-" + t.id });
     inp.addEventListener("change", () => { const v = Number(inp.value); if (Number.isInteger(v) && v >= 0 && v !== t.priority) setPriority(t, v); });
     const up = el("button", { type: "button", "aria-label": "Move " + t.id + " up" }, "↑");
     const dn = el("button", { type: "button", "aria-label": "Move " + t.id + " down" }, "↓");
     if (i === 0) up.disabled = true; else up.addEventListener("click", () => setPriority(t, Math.max(0, back[i - 1].priority - 1)));
     if (i === back.length - 1) dn.disabled = true; else dn.addEventListener("click", () => setPriority(t, back[i + 1].priority + 1));
-    return el("tr", {}, el("td", {}, el("div", { class: "prio" }, inp, up, dn)), el("td", {}, link(t)), el("td", {}, t.owner),
+    const tr = el("tr", {}, el("td", {}, el("div", { class: "prio" }, inp, up, dn)), el("td", {}, link(t)), el("td", {}, t.owner),
       el("td", {}, t.can), el("td", {}, t.title + (t.blocked ? ` [blocked: ${t.blocked}]` : "")), el("td", { class: "n" }, fmtIdle(t.idle)));
+    attachDetail(tr, t, true);
+    return openRows.has(t.num) ? [tr, detailTr(tr, t)] : [tr];
   }));
+
+  renderWaiting();
 }
 
 function render() {
   $("stamp").textContent = `${tickets.length} open tickets · checked ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · every 5 minutes`;
-  renderTree(); renderBoard(); renderCards();
+  renderBoard(); renderCards();
 }
 
 // Writes the priority line exactly as board.py set would: re-read the issue first so a concurrent edit is never overwritten.
@@ -810,7 +932,7 @@ function focusList(kind) {
 }
 function openFocus(kind) {
   focus = { kind, list: focusList(kind), i: 0 };
-  for (const p of ["team", "board", "review", "release", "canon"]) $("tab-" + p).hidden = true;
+  for (const p of ["board", "review", "release", "canon"]) $("tab-" + p).hidden = true;
   document.querySelector("nav.tabs").hidden = true; $("focus").hidden = false;
   showFocus();
 }
@@ -845,7 +967,7 @@ document.addEventListener("keydown", (e) => {
 // ---- tabs, lock, unlock ----
 function tab(name) {
   for (const b of document.querySelectorAll("nav.tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
-  for (const p of ["team", "board", "review", "release", "canon"]) $("tab-" + p).hidden = p !== name;
+  for (const p of ["board", "review", "release", "canon"]) $("tab-" + p).hidden = p !== name;
   store.set(TAB, name);
   if (name === "canon") loadCanon(false);
 }
@@ -1123,6 +1245,8 @@ $("canon-send").addEventListener("click", submitCanon);
 $("canon-drop").addEventListener("click", () => { if (confirm("Discard all your unsent canon edits?")) { clearTimeout(saveT); setCedits({}); renderCanon(); } });
 
 document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("click", () => tab(b.dataset.tab)));
+// Board search: only the Board redraws, so the other tabs and this input keep their state.
+$("board-q").addEventListener("input", () => { bf.q = $("board-q").value.trim(); renderBoard(); });
 
 function lock() {
   token = null; etag = null; tickets = []; proposals = []; releases = []; relDone = [];
@@ -1135,7 +1259,7 @@ function forget() { store.del(TOK); store.del(VAULT); lock(); }
 function start() {
   $("setup").hidden = $("unlock").hidden = true; $("setup-err").hidden = $("unlock-err").hidden = true;
   $("app").hidden = false; $("reload").hidden = false;
-  tab(store.get(TAB) || "team");
+  tab(store.get(TAB) === "team" || !store.get(TAB) ? "board" : store.get(TAB));
   load(true); clearInterval(timer); timer = setInterval(() => { if (!document.hidden) load(false); }, 300000);
 }
 $("setup-go").addEventListener("click", async () => {
