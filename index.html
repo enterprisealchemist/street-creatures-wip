@@ -567,7 +567,7 @@ function card(t, kind, onDone) {
     // "A: approve. B: redo …" is just Approve or Reject: no buttons; Reject means B
     const optA = (e) => { const m = /(?:^|[\s(.;])A:\s*([\s\S]*?)(?=\s[B-F]:\s|$)/.exec(e.textContent); return m ? m[1].trim() : ""; };
     const plain = (x) => x.opts.length === 2 && /^\W*(approve|approved|ship it|sign (it )?off|keep (it|as is|this)|good|yes|accept)\b/i.test(optA(x.e));
-    const qs = allQs.filter((x) => !plain(x));
+    const qs = allQs;   // every question gets its own buttons (Vito 11-14: "Only getting one set of buttons at the end.")
     rejectMeans = allQs.filter(plain).map((x) => x.q + x.opts[1]);
     for (const x of allQs) {
       x.e.classList.add("qbox");
@@ -586,7 +586,7 @@ function card(t, kind, onDone) {
     let h0 = b.firstElementChild;
     if (h0 && h0.classList.contains("markdown-heading")) h0 = h0.querySelector("h1, h2, h3") ? h0 : null;
     if (h0 && (/^H[1-3]$/.test(h0.nodeName) || h0.classList.contains("markdown-heading")) && h0.textContent.trim().startsWith(t.title.trim().slice(0, 30))) h0.remove();
-    for (const x of allQs.filter(plain)) x.e.append(el("span", { class: "note", style: "display:block" }, `Approve = ${x.q} A. Reject = ${x.q} ${x.opts[1]} (your comment can change it).`));
+    for (const x of allQs.filter(plain)) x.e.append(el("span", { class: "note", style: "display:block" }, `No pick: Approve = ${x.q} A, Reject = ${x.q} ${x.opts[1]}.`));
     // a paragraph that opens with a bold "Label:" is a section: the label shows as a small heading
     b.querySelectorAll(":scope > p").forEach((p) => { const k = bold(p); if (k && /:$/.test(k) && !/^Q\d+/.test(k) && !p.classList.contains("qbox")) p.classList.add("lead"); });
     // Each Capture: line becomes its picture in place, so a question's pictures sit under that question
