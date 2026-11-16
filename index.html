@@ -594,14 +594,16 @@ async function sendToTopCat() {
 document.querySelectorAll("button.send").forEach((b) => b.addEventListener("click", sendToTopCat));
 
 // ---- verdicts: comment + label on the issue ----
-async function verdict(t, kind, word, label, drop, comment) {
+async function verdict(t, kind, word, label, drop, comment, wait) {
   const body = `Vito: ${word}${comment ? " — " + comment : ""} (WIP page)`;
   // The comment and the label go at once (they used to be three calls in a row: comment, read the issue, rewrite its labels).
   // Adding a label leaves the others alone; the opposite verdict label, if the card had one, is removed beside it.
   const old = t.labels.filter((l) => drop.includes(l) && l !== label);
+  // wait (Vito 11-16 "still taking much longer"): the card names what it is still waiting on, so a slow save says where
+  const left = wait || new Set(), step = (name, pr) => { left.add(name); return pr.finally(() => left.delete(name)); };
   const [rc, rl] = await Promise.all([
-    gh(`/repos/${REPO}/issues/${t.num}/comments`, { method: "POST", body: JSON.stringify({ body }) }),
-    gh(`/repos/${REPO}/issues/${t.num}/labels`, { method: "POST", body: JSON.stringify({ labels: [label] }) }),
+    step("comment", gh(`/repos/${REPO}/issues/${t.num}/comments`, { method: "POST", body: JSON.stringify({ body }) })),
+    step("label", gh(`/repos/${REPO}/issues/${t.num}/labels`, { method: "POST", body: JSON.stringify({ labels: [label] }) })),
     ...old.map((l) => gh(`/repos/${REPO}/issues/${t.num}/labels/${encodeURIComponent(l)}`, { method: "DELETE" }).catch(() => null)),
   ]);
   if (!rc.ok) throw new Error(`comment failed (${rc.status})`);
@@ -753,7 +755,11 @@ function card(t, kind, onDone) {
     const auto = v === no && rejectMeans.length ? "picks " + rejectMeans.join(", ") : "";
     const note = [say() || auto, clipSay(), ta.value.trim()].filter(Boolean).join(" — ");
     if (v === yes && clipRejected()) v = no;   // any rejected clip: the item word is rejected
-    try { await verdict(t, kind, v[0], v[1], both, note); ta.value = ""; delete drafts[t.num]; delete drafts["p" + t.num]; delete drafts["c" + t.num]; if (onDone) onDone(); else renderCards(true); }
+    const t0 = Date.now(), wait = new Set();
+    const tick = setInterval(() => { const sec = Math.round((Date.now() - t0) / 1000);
+      msg.textContent = `Writing to the ticket… ${sec} s` + (wait.size ? ` (waiting on GitHub: ${[...wait].join(", ")})` : ""); }, 1000);
+    try { await verdict(t, kind, v[0], v[1], both, note, wait).finally(() => clearInterval(tick));
+      lastSave = ((Date.now() - t0) / 1000).toFixed(1); ta.value = ""; delete drafts[t.num]; delete drafts["p" + t.num]; delete drafts["c" + t.num]; if (onDone) onDone(); else renderCards(true); }
     catch (e) { msg.textContent = "Not saved: " + e.message + ". Your comment is still here."; ok.disabled = bad.disabled = false; }
   };
   ok.addEventListener("click", () => go(yes)); bad.addEventListener("click", () => go(no));
@@ -763,8 +769,10 @@ function card(t, kind, onDone) {
   c.append(ta, el("div", { class: "acts" }, ok, bad, msg));
   return c;
 }
+// Shown on the status line, so a tab still running an older copy of this page is easy to spot.
+const PAGE_V = "11-16b";
 const drafts = {};
-let deferred = false;
+let deferred = false, lastSave = null;
 function renderCards(force) {
   // never redraw under someone typing: wait until the comment box loses focus
   if (!force && document.activeElement && document.activeElement.tagName === "TEXTAREA") { deferred = true; return; }
@@ -959,7 +967,7 @@ function renderBoard() {
 }
 
 function render() {
-  $("stamp").textContent = `${tickets.length} open tickets · checked ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · every 5 minutes`;
+  $("stamp").textContent = `${tickets.length} open tickets · checked ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · every 5 minutes${lastSave ? " · last save " + lastSave + " s" : ""} · page ${PAGE_V}`;
   renderBoard(); renderCards();
 }
 
