@@ -343,14 +343,21 @@ function parse(issue) {
 // Every call has a time limit: a fetch that never answers used to hold the page's refresh lock for good, so the page
 // stopped refreshing until it was reopened. Captures get longer (big GIFs), everything else 25 s.
 async function gh(path, opts = {}) {
-  const ms = opts.ms || 25000, ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), ms);
+  // Vito 11-16 ("took more than 25s"): 60 s per try, and a read that times out or drops is tried once more before it fails.
+  // A write (POST/PATCH/DELETE) is never re-sent on its own, so a comment can't post twice.
+  const ms = opts.ms || 60000, read = !opts.method || opts.method === "GET", what = path.split("?")[0].replace(/^\/repos\/[^/]+\/[^/]+/, "");
   let r;
-  try {
-    r = await fetch(API + path, { cache: "no-cache", ...opts, signal: ctl.signal, headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + token,
-      "X-GitHub-Api-Version": "2022-11-28", ...(opts.headers || {}) } });
-  } catch (e) {
-    throw new Error(e.name === "AbortError" ? `GitHub did not answer in ${ms / 1000} s` : "network error (" + e.message + ")");
-  } finally { clearTimeout(tm); }
+  for (let tryN = 1; ; tryN++) {
+    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), ms);
+    try {
+      r = await fetch(API + path, { cache: "no-cache", ...opts, signal: ctl.signal, headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + token,
+        "X-GitHub-Api-Version": "2022-11-28", ...(opts.headers || {}) } });
+      break;
+    } catch (e) {
+      if (read && tryN < 2) continue;
+      throw new Error(e.name === "AbortError" ? `GitHub did not answer ${what} in ${ms / 1000} s${read ? " (tried twice)" : ""}` : `network error on ${what} (${e.message})`);
+    } finally { clearTimeout(tm); }
+  }
   if (r.status === 401) throw Object.assign(new Error("GitHub refused the token (401). Set up again with a new token."), { auth: true });
   if ((r.status === 403 || r.status === 429) && (r.headers.get("x-ratelimit-remaining") === "0" || r.headers.get("retry-after"))) {
     const reset = r.headers.get("x-ratelimit-reset"), at = reset ? new Date(reset * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "in a few minutes";
@@ -411,7 +418,7 @@ async function load(force) {
     etag = tag;                                             // only after a full load, so a failed load is retried
   } catch (e) {
     if (e.auth) { store.del(TOK); lock(); $("setup-err").textContent = e.message; $("setup-err").hidden = false; }
-    else $("stamp").textContent = "Load failed: " + e.message;
+    else { $("stamp").textContent = "Load failed: " + e.message + " Retrying in 30 s."; setTimeout(() => { if (!busy && !document.hidden) load(false); }, 30000); }
   } finally {
     busy = false;
     if (again) { const f = again === "force"; again = null; setTimeout(() => load(f), 0); }
@@ -770,7 +777,7 @@ function card(t, kind, onDone) {
   return c;
 }
 // Shown on the status line, so a tab still running an older copy of this page is easy to spot.
-const PAGE_V = "11-16b";
+const PAGE_V = "11-16c";
 const drafts = {};
 let deferred = false, lastSave = null;
 function renderCards(force) {
