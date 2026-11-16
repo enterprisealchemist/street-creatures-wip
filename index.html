@@ -415,7 +415,7 @@ async function loadReview() {
   // sorted once per load, so a card Vito just decided stays where it is until the next refresh
   for (const t of proposals) t.decided = t.labels.some((l) => l === "vito-approved" || l === "vito-rejected");
   // Vito 11-08: anyone's comment after his verdict puts a decided item back in front of him as waiting
-  const keys = {}; for (const x of raw) keys[x.number] = x.updated_at;
+  const keys = {}; for (const x of raw) keys[x.number] = x.comments;   // a new comment, not any edit, is what can change these
   await Promise.all(proposals.filter((t) => t.decided).map(async (t) => {
     const k = "p" + t.num;
     if (!revCache[k] || revCache[k].key !== keys[t.num]) {
@@ -436,7 +436,7 @@ async function loadRelease() {
   const since = new Date(Date.now() - 14 * 864e5).toISOString();
   const raw = await pages(`/repos/${REPO}/issues?labels=release-note&state=all&since=${since}&sort=updated`);
   const rows = raw.map(parse), keys = {};
-  for (const x of raw) keys[x.number] = x.updated_at;
+  for (const x of raw) keys[x.number] = x.comments;   // a new comment, not any edit, is what can change these
   const todo = rows.filter((t) => !relCache[t.num] || relCache[t.num].key !== keys[t.num]);
   let left = todo.length;
   const one = async (t) => {
@@ -469,9 +469,45 @@ function parseNote(body) {
 // Captures live in the private repo: fetched with the token, shown as object URLs.
 const imgCache = {};
 let loadGen = 0;   // bumped by each full load (something on the board changed): images are re-checked once per bump
+// Vito 11-16 ("WIP seems to be much slower"): a capture loads only when its figure nears the screen. The Release tab
+// alone holds hundreds of captures, and fetching them all at start took about 30 s and tripped GitHub's limits.
+const lazy = "IntersectionObserver" in window ? new IntersectionObserver((es) => { for (const e of es) if (e.isIntersecting) {
+  lazy.unobserve(e.target); const s = e.target._shot; e.target._shot = null; if (s) fill(e.target, s); } }, { rootMargin: "800px 0px" }) : null;
 function shot(s, into) {
   const fig = el("figure", {}, el("div", { class: "note" }, "Loading " + s.path.split("/").pop() + "…"));
-  into.append(fig); fill(fig, s);
+  into.append(fig);
+  if (lazy) { fig._shot = s; lazy.observe(fig); } else fill(fig, s);
+}
+// Image captures are kept between visits (Cache Storage, with GitHub's ETag): a reload shows them after a free 304
+// instead of downloading each again. One fetch per path at a time, however many figures ask for it.
+const IMGC = "sc-wip-img1", inflight = {};
+const imgKey = (path) => "https://wip-cache.invalid/" + encodeURIComponent(path);
+function getImg(path) {
+  const c0 = imgCache[path];
+  if (c0 && c0.gen === loadGen) return Promise.resolve(c0);
+  if (inflight[path]) return inflight[path];
+  return (inflight[path] = (async () => {
+    let c = imgCache[path], box = null;
+    try { box = await caches.open(IMGC); } catch (e) {}
+    if (!c && box) {
+      const hit = await box.match(imgKey(path)).catch(() => null);
+      if (hit) c = imgCache[path] = { url: URL.createObjectURL(await hit.blob()), etag: hit.headers.get("x-etag"), gen: -1 };
+    }
+    // Vito 11-09: a retake re-rendered under the same filename showed the old take until reload. Each full load re-asks
+    // GitHub with the file's ETag: a 304 (free, it does not count against the hourly limit) keeps it, a 200 replaces it.
+    const r = await gh(`/repos/${REPO}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=master`,
+      { headers: { Accept: "application/vnd.github.raw+json", ...(c && c.etag ? { "If-None-Match": c.etag } : {}) } });
+    if (r.status === 304 && c) { c.gen = loadGen; return c; }
+    if (!r.ok) throw new Error(r.status);
+    // GitHub labels raw files application/vnd.github.raw+json; Safari will not show an image under that type
+    const ext = (path.split(".").pop() || "").toLowerCase();
+    const type = { png: "image/png", gif: "image/gif", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", webm: "video/webm",
+      mp4: "video/mp4", ogg: "audio/ogg", wav: "audio/wav", mp3: "audio/mpeg" }[ext] || "application/octet-stream";
+    const blob = new Blob([await r.blob()], { type }), etag = r.headers.get("ETag");
+    if (c) URL.revokeObjectURL(c.url);
+    if (box && etag) box.put(imgKey(path), new Response(blob, { headers: { "content-type": type, "x-etag": etag } })).catch(() => {});
+    return (imgCache[path] = { url: URL.createObjectURL(blob), etag, gen: loadGen });
+  })().finally(() => { delete inflight[path]; }));
 }
 async function fill(fig, s) {
   try {
@@ -488,23 +524,7 @@ async function fill(fig, s) {
       fig.replaceChildren(box, ...(s.cap ? [el("figcaption", {}, s.cap)] : []));
       return;
     }
-    // Vito 11-09: a retake re-rendered under the same filename showed the old take until reload. Each full load re-asks
-    // GitHub with the file's ETag: a 304 (free, it does not count against the hourly limit) keeps it, a 200 replaces it.
-    const c = imgCache[s.path];
-    if (!c || c.gen !== loadGen) {
-      const r = await gh(`/repos/${REPO}/contents/${s.path.split("/").map(encodeURIComponent).join("/")}?ref=master`,
-        { headers: { Accept: "application/vnd.github.raw+json", ...(c && c.etag ? { "If-None-Match": c.etag } : {}) } });
-      if (r.status === 304 && c) c.gen = loadGen;
-      else {
-      if (!r.ok) throw new Error(r.status);
-      // GitHub labels raw files application/vnd.github.raw+json; Safari will not show an image under that type
-      const ext = (s.path.split(".").pop() || "").toLowerCase();
-      const type = { png: "image/png", gif: "image/gif", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", webm: "video/webm",
-        mp4: "video/mp4", ogg: "audio/ogg", wav: "audio/wav", mp3: "audio/mpeg" }[ext] || "application/octet-stream";
-      if (c) URL.revokeObjectURL(c.url);
-      imgCache[s.path] = { url: URL.createObjectURL(new Blob([await r.blob()], { type })), etag: r.headers.get("ETag"), gen: loadGen };
-      }
-    }
+    await getImg(s.path);
     const u = imgCache[s.path].url;
     // Vito 11-12: a sound on a Review item is a play button, not a wide player or a clip, so it fits a phone and plays at a tap.
     if (/\.(ogg|wav|mp3)$/i.test(s.path)) {
