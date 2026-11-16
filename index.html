@@ -363,6 +363,27 @@ async function pages(path, accept) {
   }
 }
 
+// Closed board tickets (done counts on the milestone bar and lead rows, the "blocker closed" mark). There are
+// thousands, so they are cached in this browser with only the fields the Board uses, and each load fetches just
+// the ones closed or updated since the last fetch (one page, usually). The first ever load fetches them all once.
+const CLOSEDC = "sc-wip-closed1";
+async function loadClosed() {
+  let c = null; try { c = JSON.parse(store.get(CLOSEDC) || "null"); } catch (e) { c = null; }
+  const byNum = new Map((c && c.rows || []).map((t) => [t.num, t]));
+  const started = new Date().toISOString();
+  try {
+    const since = c && c.at ? `&since=${encodeURIComponent(c.at)}` : "";
+    const rows = await pages(`/repos/${REPO}/issues?labels=board&state=closed&sort=updated&direction=desc${since}`);
+    for (const x of rows) { const t = parse(x); byNum.set(t.num, { num: t.num, id: t.id, stage: t.stage, batch: t.batch, status: t.status }); }
+    // a reopened ticket is open again: drop it from the closed list
+    for (const t of tickets) byNum.delete(t.num);
+    try { store.set(CLOSEDC, JSON.stringify({ at: started, rows: [...byNum.values()] })); } catch (e) { /* quota: keep in memory */ }
+  } catch (e) { /* offline or rate-limited: use the cache as is */ }
+  closedTickets = [...byNum.values()];
+  closedIds = new Set();
+  for (const t of closedTickets) { closedIds.add(t.id); closedIds.add("#" + t.num); }
+}
+
 async function load(force) {
   if (busy) return; busy = true;
   try {
@@ -374,13 +395,8 @@ async function load(force) {
     const tag = r.headers.get("ETag");
     loadGen += 1;
     tickets = (await pages(`/repos/${REPO}/issues?labels=board&state=open`)).map(parse);
-    // Closed board tickets: done counts on the milestone bar and lead rows, and the "blocker closed" mark.
-    try {
-      closedTickets = (await pages(`/repos/${REPO}/issues?labels=board&state=closed&sort=updated&direction=desc`)).map(parse);
-    } catch (e) { closedTickets = []; }
-    closedIds = new Set();
-    for (const t of closedTickets) { closedIds.add(t.id); closedIds.add("#" + t.num); }
-    render();                                               // Board shows now; Review and Release follow
+    render();                                               // Board shows now; closed, Review and Release follow
+    await loadClosed(); render();
     await loadReview(); render();
     await loadRelease(); render();
     etag = tag;                                             // only after a full load, so a failed load is retried
