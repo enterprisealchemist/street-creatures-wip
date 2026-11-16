@@ -282,7 +282,7 @@ const LIVE = ["progress", "todo", "ready", "pr", "review", "park", "proposal"];
 const ACTIVE = ["progress", "todo", "ready", "pr", "review"];
 const VAULT = "sc-wip-vault", OLD = "sc-wip-token", TOK = "sc-wip-gh", TAB = "sc-wip-tab";
 const $ = (id) => document.getElementById(id);
-let token = null, tickets = [], etag = null, timer = null, busy = false;
+let token = null, tickets = [], etag = null, timer = null, busy = false, again = null;
 let proposals = [], releases = [], relDone = [];
 const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
                 set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
@@ -340,9 +340,17 @@ function parse(issue) {
   };
 }
 
+// Every call has a time limit: a fetch that never answers used to hold the page's refresh lock for good, so the page
+// stopped refreshing until it was reopened. Captures get longer (big GIFs), everything else 25 s.
 async function gh(path, opts = {}) {
-  const r = await fetch(API + path, { cache: "no-cache", ...opts, headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + token,
-    "X-GitHub-Api-Version": "2022-11-28", ...(opts.headers || {}) } });
+  const ms = opts.ms || 25000, ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), ms);
+  let r;
+  try {
+    r = await fetch(API + path, { cache: "no-cache", ...opts, signal: ctl.signal, headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + token,
+      "X-GitHub-Api-Version": "2022-11-28", ...(opts.headers || {}) } });
+  } catch (e) {
+    throw new Error(e.name === "AbortError" ? `GitHub did not answer in ${ms / 1000} s` : "network error (" + e.message + ")");
+  } finally { clearTimeout(tm); }
   if (r.status === 401) throw Object.assign(new Error("GitHub refused the token (401). Set up again with a new token."), { auth: true });
   if ((r.status === 403 || r.status === 429) && (r.headers.get("x-ratelimit-remaining") === "0" || r.headers.get("retry-after"))) {
     const reset = r.headers.get("x-ratelimit-reset"), at = reset ? new Date(reset * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "in a few minutes";
@@ -385,7 +393,8 @@ async function loadClosed() {
 }
 
 async function load(force) {
-  if (busy) return; busy = true;
+  if (busy) { again = again || (force ? "force" : "soft"); return; }   // asked mid-load: run once more after it
+  busy = true;
   try {
     // Any comment, label, edit or close on any issue moves the newest "updated" issue, so this one cheap call
     // (a 304 when nothing moved) tells whether anything on the page can have changed.
@@ -403,7 +412,10 @@ async function load(force) {
   } catch (e) {
     if (e.auth) { store.del(TOK); lock(); $("setup-err").textContent = e.message; $("setup-err").hidden = false; }
     else $("stamp").textContent = "Load failed: " + e.message;
-  } finally { busy = false; }
+  } finally {
+    busy = false;
+    if (again) { const f = again === "force"; again = null; setTimeout(() => load(f), 0); }
+  }
 }
 
 // ---- Review: open proposals, rendered by GitHub (sanitised HTML) ----
@@ -481,6 +493,11 @@ function shot(s, into) {
 // Image captures are kept between visits (Cache Storage, with GitHub's ETag): a reload shows them after a free 304
 // instead of downloading each again. One fetch per path at a time, however many figures ask for it.
 const IMGC = "sc-wip-img1", inflight = {};
+// At most 3 capture downloads at once: with every figure on screen downloading together, a verdict's write queued
+// behind megabytes of GIFs ("Writing to the ticket…" for ages). Writes never wait in this queue.
+let imgSlots = 3; const imgWait = [];
+const imgSlot = () => imgSlots > 0 ? (imgSlots--, Promise.resolve()) : new Promise((res) => imgWait.push(res));
+const imgFree = () => { const n = imgWait.shift(); if (n) n(); else imgSlots++; };
 const imgKey = (path) => "https://wip-cache.invalid/" + encodeURIComponent(path);
 function getImg(path) {
   const c0 = imgCache[path];
@@ -495,15 +512,20 @@ function getImg(path) {
     }
     // Vito 11-09: a retake re-rendered under the same filename showed the old take until reload. Each full load re-asks
     // GitHub with the file's ETag: a 304 (free, it does not count against the hourly limit) keeps it, a 200 replaces it.
-    const r = await gh(`/repos/${REPO}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=master`,
-      { headers: { Accept: "application/vnd.github.raw+json", ...(c && c.etag ? { "If-None-Match": c.etag } : {}) } });
+    await imgSlot();
+    let r, raw;
+    try {
+      r = await gh(`/repos/${REPO}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=master`,
+        { ms: 90000, headers: { Accept: "application/vnd.github.raw+json", ...(c && c.etag ? { "If-None-Match": c.etag } : {}) } });
+      if (r.ok) raw = await r.blob();
+    } finally { imgFree(); }
     if (r.status === 304 && c) { c.gen = loadGen; return c; }
     if (!r.ok) throw new Error(r.status);
     // GitHub labels raw files application/vnd.github.raw+json; Safari will not show an image under that type
     const ext = (path.split(".").pop() || "").toLowerCase();
     const type = { png: "image/png", gif: "image/gif", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", webm: "video/webm",
       mp4: "video/mp4", ogg: "audio/ogg", wav: "audio/wav", mp3: "audio/mpeg" }[ext] || "application/octet-stream";
-    const blob = new Blob([await r.blob()], { type }), etag = r.headers.get("ETag");
+    const blob = new Blob([raw], { type }), etag = r.headers.get("ETag");
     if (c) URL.revokeObjectURL(c.url);
     if (box && etag) box.put(imgKey(path), new Response(blob, { headers: { "content-type": type, "x-etag": etag } })).catch(() => {});
     return (imgCache[path] = { url: URL.createObjectURL(blob), etag, gen: loadGen });
@@ -574,12 +596,17 @@ document.querySelectorAll("button.send").forEach((b) => b.addEventListener("clic
 // ---- verdicts: comment + label on the issue ----
 async function verdict(t, kind, word, label, drop, comment) {
   const body = `Vito: ${word}${comment ? " — " + comment : ""} (WIP page)`;
-  let r = await gh(`/repos/${REPO}/issues/${t.num}/comments`, { method: "POST", body: JSON.stringify({ body }) });
-  if (!r.ok) throw new Error(`comment failed (${r.status})`);
-  const cur = await (await gh(`/repos/${REPO}/issues/${t.num}`)).json();
-  const labels = cur.labels.map((l) => l.name).filter((l) => !drop.includes(l)).concat(label);
-  r = await gh(`/repos/${REPO}/issues/${t.num}`, { method: "PATCH", body: JSON.stringify({ labels }) });
-  if (!r.ok) throw new Error(`label failed (${r.status})`);
+  // The comment and the label go at once (they used to be three calls in a row: comment, read the issue, rewrite its labels).
+  // Adding a label leaves the others alone; the opposite verdict label, if the card had one, is removed beside it.
+  const old = t.labels.filter((l) => drop.includes(l) && l !== label);
+  const [rc, rl] = await Promise.all([
+    gh(`/repos/${REPO}/issues/${t.num}/comments`, { method: "POST", body: JSON.stringify({ body }) }),
+    gh(`/repos/${REPO}/issues/${t.num}/labels`, { method: "POST", body: JSON.stringify({ labels: [label] }) }),
+    ...old.map((l) => gh(`/repos/${REPO}/issues/${t.num}/labels/${encodeURIComponent(l)}`, { method: "DELETE" }).catch(() => null)),
+  ]);
+  if (!rc.ok) throw new Error(`comment failed (${rc.status})`);
+  if (!rl.ok) throw new Error(`label failed (${rl.status})`);
+  const labels = t.labels.filter((l) => !drop.includes(l)).concat(label);
   t.labels = labels; t.verdict = word;
   const p = pending(); p[t.num] = label.slice(5); setPending(p);
 }
