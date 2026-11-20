@@ -630,6 +630,10 @@ function h(){up({type:"height",h:Math.ceil(document.documentElement.scrollHeight
 window.addEventListener("message",function(e){var d=e.data||{};if(e.source!==parent||d.type!=="captures")return;var f=d.files||{};
 document.querySelectorAll("[data-capture],[src],[href]").forEach(function(n){var p=n.getAttribute("data-capture")||n.getAttribute("src")||n.getAttribute("href");
 if(!p||!f[p])return;if(n.nodeName==="A")n.setAttribute("href",f[p]);else n.setAttribute("src",f[p]);});setTimeout(h,50);});
+window.addEventListener("message",function(e){if(e.source!==parent||(e.data||{}).type!=="collect")return;var ps=[];
+document.querySelectorAll("[data-piece]").forEach(function(c){var on=c.querySelector(".on,[aria-pressed=true],input:checked");var tx=c.querySelector("textarea,input[type=text]");
+var ch=on?(on.getAttribute("data-v")||on.value||on.textContent||"").trim():"";var cm=tx?tx.value.trim():"";if(ch||cm)ps.push({piece:c.getAttribute("data-piece"),choice:ch||"comment",comment:cm});});
+up({type:"pieces",pieces:ps});});
 window.addEventListener("load",h);if(window.ResizeObserver)new ResizeObserver(h).observe(document.documentElement);up({type:"ready"});})();<\/script>`;
 const wipHtmlOf = (raw) => { const m = /```wip-html[^\n]*\n([\s\S]*?)\n```/.exec(raw || ""); return m ? m[1] : null; };
 const capPaths = (html) => [...new Set([...html.matchAll(/(?:data-capture|src|href)\s*=\s*["']([^"':]+\.(?:png|gif|jpe?g|webp|webm|mp4|ogg|wav|mp3))["']/gi)].map((m) => m[1]))];
@@ -652,8 +656,13 @@ function htmlFrame(t, html, onVerdict) {
       await Promise.all(paths.map((p) => capDataUrl(p).then((u) => { files[p] = u; }).catch(() => {})));
       if (fr.contentWindow) fr.contentWindow.postMessage({ type: "captures", files }, "*");
     } else if (d.type === "verdict") onVerdict(d);
+    else if (d.wip && d.type === "pieces" && fr._want) { const w = fr._want; fr._want = null; w(d.pieces || []); }
   };
   window.addEventListener("message", on);
+  // Vito 11-20 "make sure my comments get read": the card's own Approve/Reject first asks the frame for every pick and
+  // comment it holds ([data-piece] blocks: the .on button and the textarea), so nothing typed in the frame is lost.
+  fr.collect = () => new Promise((ok) => { if (!fr.contentWindow) return ok([]); const tm = setTimeout(() => { fr._want = null; ok([]); }, 1500);
+    fr._want = (ps) => { clearTimeout(tm); ok(ps); }; fr.contentWindow.postMessage({ type: "collect" }, "*"); });
   return fr;
 }
 function card(t, kind, onDone) {
@@ -676,7 +685,7 @@ function card(t, kind, onDone) {
   let say = () => "";   // the question picks as "picks Q1B, Q2A" (Review cards only)
   let clipSay = () => "", clipRejected = () => false, clipSync = () => {};   // clip toggles (animation batch items)
   let rejectMeans = [];   // approve-or-redo questions: a Reject records their B
-  let htmlSay = () => "", htmlAct = null;   // freeform HTML items: the frame's per-piece picks, and its own send
+  let htmlSay = () => "", htmlAct = null, htmlCollect = null;   // freeform HTML items: the frame's per-piece picks, and its own send
   if (isRev) {
     const b = el("div", { class: "body" }); b.innerHTML = t.bodyHtml;   // GitHub's own sanitised render
     b.querySelectorAll("pre").forEach((p) => { if (p.textContent.trim().startsWith("status:") || /^\s*(owner|status|next|priority):/m.test(p.textContent)) (p.closest(".snippet-clipboard-content") || p).remove(); });
@@ -689,8 +698,10 @@ function card(t, kind, onDone) {
       b.querySelectorAll("pre").forEach((p) => { if (p.getAttribute("lang") === "wip-html" || p.textContent.trim() === wipHtml.trim()) { const box = p.closest(".highlight, .snippet-clipboard-content") || p; spot = spot || box; if (box !== spot) box.remove(); } });
       let hp = drafts["h" + t.num] || [];
       htmlSay = () => hp.length ? "pieces: " + hp.map((x) => x.piece + "=" + x.choice + (x.comment ? " (" + x.comment + ")" : "")).join(", ") : "";
+      const clean = (ps) => ps.filter((x) => x && x.piece).map((x) => ({ piece: String(x.piece).slice(0, 80), choice: String(x.choice || "").slice(0, 40), comment: String(x.comment || "").replace(/\s+/g, " ").slice(0, 400) }));
+      htmlCollect = async () => { const ps = clean(await fr.collect()); if (ps.length) hp = drafts["h" + t.num] = ps; };
       const fr = htmlFrame(t, wipHtml, (d) => {
-        if (Array.isArray(d.pieces)) hp = drafts["h" + t.num] = d.pieces.filter((x) => x && x.piece).map((x) => ({ piece: String(x.piece).slice(0, 80), choice: String(x.choice || "").slice(0, 40), comment: String(x.comment || "").replace(/\s+/g, " ").slice(0, 400) }));
+        if (Array.isArray(d.pieces)) hp = drafts["h" + t.num] = clean(d.pieces);
         if (d.comment && typeof d.comment === "string" && htmlAct) htmlAct.ta.value = d.comment.slice(0, 2000);
         if (htmlAct) htmlAct.sync();
         if (htmlAct && (d.overall === "approve" || d.overall === "reject")) htmlAct.send(d.overall);
@@ -811,6 +822,7 @@ function card(t, kind, onDone) {
   const go = async (v) => {
     if (v === no && !isRev && !ta.value.trim()) { msg.textContent = "Say what to fix first."; ta.focus(); return; }
     ok.disabled = bad.disabled = true; msg.textContent = "Writing to the ticket…";
+    if (htmlCollect) { try { await htmlCollect(); } catch (e) {} }
     const auto = v === no && rejectMeans.length ? "picks " + rejectMeans.join(", ") : "";
     const note = [say() || auto, clipSay(), htmlSay(), ta.value.trim()].filter(Boolean).join(" — ");
     if (v === yes && clipRejected()) v = no;   // any rejected clip: the item word is rejected
@@ -831,7 +843,7 @@ function card(t, kind, onDone) {
   return c;
 }
 // Shown on the status line, so a tab still running an older copy of this page is easy to spot.
-const PAGE_V = "11-20a";
+const PAGE_V = "11-20b";
 const drafts = {};
 let deferred = false, lastSave = null;
 function renderCards(force) {
