@@ -630,10 +630,19 @@ function h(){up({type:"height",h:Math.ceil(document.documentElement.scrollHeight
 window.addEventListener("message",function(e){var d=e.data||{};if(e.source!==parent||d.type!=="captures")return;var f=d.files||{};
 document.querySelectorAll("[data-capture],[src],[href]").forEach(function(n){var p=n.getAttribute("data-capture")||n.getAttribute("src")||n.getAttribute("href");
 if(!p||!f[p])return;if(n.nodeName==="A")n.setAttribute("href",f[p]);else n.setAttribute("src",f[p]);});setTimeout(h,50);});
-window.addEventListener("message",function(e){if(e.source!==parent||(e.data||{}).type!=="collect")return;var ps=[];
-document.querySelectorAll("[data-piece]").forEach(function(c){var on=c.querySelector(".on,[aria-pressed=true],input:checked");var tx=c.querySelector("textarea,input[type=text]");
-var ch=on?(on.getAttribute("data-v")||on.value||on.textContent||"").trim():"";var cm=tx?tx.value.trim():"";if(ch||cm)ps.push({piece:c.getAttribute("data-piece"),choice:ch||"comment",comment:cm});});
-up({type:"pieces",pieces:ps});});
+var TX="textarea,input[type=text],input:not([type])";
+function snap(){var ps=[];document.querySelectorAll("[data-piece]").forEach(function(c){var on=c.querySelector(".on,[aria-pressed=true],input:checked");
+var cm=[].map.call(c.querySelectorAll(TX),function(x){return x.value.trim();}).filter(Boolean).join(" / ");
+var ch=on?(on.getAttribute("data-v")||on.getAttribute("data-choice")||on.value||on.textContent||"").trim():"";if(ch||cm)ps.push({piece:c.getAttribute("data-piece"),choice:ch||"comment",comment:cm});});
+document.querySelectorAll(TX).forEach(function(x){if(x.closest("[data-piece]"))return;var v=x.value.trim();if(v)ps.push({piece:x.id||x.name||"note",choice:"comment",comment:v});});return ps;}
+function raw(){return{tx:[].map.call(document.querySelectorAll(TX),function(x){return x.value;}),on:[].map.call(document.querySelectorAll("button,[role=button]"),function(b,i){return b.matches(".on,[aria-pressed=true]")?i:-1;}).filter(function(i){return i>=0;})};}
+function send(){up({type:"pieces",pieces:snap(),raw:raw()});}
+var tm=0;function live(){clearTimeout(tm);tm=setTimeout(send,250);}
+document.addEventListener("input",live,true);document.addEventListener("change",live,true);document.addEventListener("click",live,true);
+window.addEventListener("message",function(e){var d=e.data||{};if(e.source!==parent)return;
+if(d.type==="collect")send();
+else if(d.type==="restore"&&d.raw){var r=d.raw,bs=document.querySelectorAll("button,[role=button]");(r.on||[]).forEach(function(i){if(bs[i]&&!bs[i].matches(".on,[aria-pressed=true]"))bs[i].click();});
+document.querySelectorAll(TX).forEach(function(x,i){if(r.tx&&typeof r.tx[i]==="string"&&r.tx[i]&&!x.value){x.value=r.tx[i];x.dispatchEvent(new Event("input",{bubbles:true}));}});}});
 window.addEventListener("load",h);if(window.ResizeObserver)new ResizeObserver(h).observe(document.documentElement);up({type:"ready"});})();<\/script>`;
 const wipHtmlOf = (raw) => { const m = /```wip-html[^\n]*\n([\s\S]*?)\n```/.exec(raw || ""); return m ? m[1] : null; };
 const capPaths = (html) => [...new Set([...html.matchAll(/(?:data-capture|src|href)\s*=\s*["']([^"':]+\.(?:png|gif|jpe?g|webp|webm|mp4|ogg|wav|mp3))["']/gi)].map((m) => m[1]))];
@@ -651,12 +660,18 @@ function htmlFrame(t, html, onVerdict) {
     if (e.source !== fr.contentWindow) return;
     const d = e.data || {};   // the source check is the trust line: only this item's own frame is heard
     if (d.wip && d.type === "height" && d.h > 0) fr.style.height = Math.min(d.h + 4, 6000) + "px";
-    else if (d.wip && d.type === "ready" && paths.length) {
+    else if (d.wip && d.type === "ready" && drafts["hr" + t.num] && fr.contentWindow) fr.contentWindow.postMessage({ type: "restore", raw: drafts["hr" + t.num] }, "*");
+    if (d.wip && d.type === "ready" && paths.length) {
       const files = {};
       await Promise.all(paths.map((p) => capDataUrl(p).then((u) => { files[p] = u; }).catch(() => {})));
       if (fr.contentWindow) fr.contentWindow.postMessage({ type: "captures", files }, "*");
     } else if (d.type === "verdict") onVerdict(d);
-    else if (d.wip && d.type === "pieces" && fr._want) { const w = fr._want; fr._want = null; w(d.pieces || []); }
+    else if (d.wip && d.type === "pieces") {
+      // Vito 11-22 "I had left notes on it": every keystroke and click in the frame is kept as a draft, so a redraw
+      // (the 5-minute refresh, another card's verdict) puts it all back and the card's own buttons always send it.
+      if (d.raw) drafts["hr" + t.num] = d.raw;
+      if (fr._want) { const w = fr._want; fr._want = null; w(d.pieces || []); } else onVerdict({ pieces: d.pieces || [] });
+    }
   };
   window.addEventListener("message", on);
   // Vito 11-20 "make sure my comments get read": the card's own Approve/Reject first asks the frame for every pick and
@@ -830,7 +845,7 @@ function card(t, kind, onDone) {
     const tick = setInterval(() => { const sec = Math.round((Date.now() - t0) / 1000);
       msg.textContent = `Writing to the ticket… ${sec} s` + (wait.size ? ` (waiting on GitHub: ${[...wait].join(", ")})` : ""); }, 1000);
     try { await verdict(t, kind, v[0], v[1], both, note, wait).finally(() => clearInterval(tick));
-      lastSave = ((Date.now() - t0) / 1000).toFixed(1); ta.value = ""; delete drafts[t.num]; delete drafts["p" + t.num]; delete drafts["c" + t.num]; delete drafts["h" + t.num]; if (onDone) onDone(); else renderCards(true); }
+      lastSave = ((Date.now() - t0) / 1000).toFixed(1); ta.value = ""; delete drafts[t.num]; delete drafts["p" + t.num]; delete drafts["c" + t.num]; delete drafts["h" + t.num]; delete drafts["hr" + t.num]; if (onDone) onDone(); else renderCards(true); }
     catch (e) { msg.textContent = "Not saved: " + e.message + ". Your comment is still here."; ok.disabled = bad.disabled = false; }
   };
   ok.addEventListener("click", () => go(yes)); bad.addEventListener("click", () => go(no));
@@ -843,12 +858,12 @@ function card(t, kind, onDone) {
   return c;
 }
 // Shown on the status line, so a tab still running an older copy of this page is easy to spot.
-const PAGE_V = "11-20b";
+const PAGE_V = "11-22";
 const drafts = {};
 let deferred = false, lastSave = null;
 function renderCards(force) {
   // never redraw under someone typing: wait until the comment box loses focus
-  if (!force && document.activeElement && document.activeElement.tagName === "TEXTAREA") { deferred = true; return; }
+  if (!force && document.activeElement && /^(TEXTAREA|IFRAME)$/.test(document.activeElement.tagName)) { deferred = true; return; }
   deferred = false;
   const rev = $("review-cards");
   const waiting = proposals.filter((t) => !t.decided), isArt = (t) => t.id.startsWith("rv-");
